@@ -80,6 +80,11 @@ WSGI_APPLICATION = 'phoenix.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
+db_options = {}
+postgres_sslmode = os.getenv("POSTGRES_SSLMODE")
+if postgres_sslmode:
+    db_options["sslmode"] = postgres_sslmode
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -88,6 +93,7 @@ DATABASES = {
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "phoenix"),
         "HOST": os.getenv("POSTGRES_HOST", "db"),
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        "OPTIONS": db_options,
     }
 }
 
