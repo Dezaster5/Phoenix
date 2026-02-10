@@ -2,6 +2,11 @@
 
 Credential vault service for company employees (Django + PostgreSQL + React).
 
+## Documentation
+- Full project documentation (RU): `PROJECT_DOCUMENTATION.md`
+- Backend architecture details: `BACKEND_ARCHITECTURE.md`
+- ER diagram: `er_diagram.md`
+
 ## Stack
 - Django 4.2 + DRF
 - PostgreSQL 16
