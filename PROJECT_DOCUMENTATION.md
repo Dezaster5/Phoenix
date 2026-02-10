@@ -53,9 +53,9 @@ Phoenix/
 ├─ docker-compose.yml
 ├─ Dockerfile
 ├─ .env.example
-├─ [README.md](https://github.com/Dezaster5/Phoenix/blob/main/README.md)
-├─ [BACKEND_ARCHITECTURE.md](https://github.com/Dezaster5/Phoenix/blob/main/BACKEND_ARCHITECTURE.md)
-└─ [er_diagram.md](https://github.com/Dezaster5/Phoenix/blob/main/er_diagram.md)
+├─ README.md
+├─ BACKEND_ARCHITECTURE.md
+└─ er_diagram.md
 ```
 
 ---
