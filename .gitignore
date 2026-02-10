@@ -1,0 +1,14 @@
+.obsidian
+.vscode
+venv
+frontend/node_modules
+frontend/dist
+frontend/.env
+.env
+keys/
+phoenix/keys/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
