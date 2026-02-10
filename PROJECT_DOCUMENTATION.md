@@ -53,9 +53,9 @@ Phoenix/
 ├─ docker-compose.yml
 ├─ Dockerfile
 ├─ .env.example
-├─ README.md
-├─ BACKEND_ARCHITECTURE.md
-└─ er_diagram.md
+├─ [README.md](https://github.com/Dezaster5/Phoenix/blob/main/README.md)
+├─ [BACKEND_ARCHITECTURE.md](https://github.com/Dezaster5/Phoenix/blob/main/BACKEND_ARCHITECTURE.md)
+└─ [er_diagram.md](https://github.com/Dezaster5/Phoenix/blob/main/er_diagram.md)
 ```
 
 ---
@@ -138,7 +138,7 @@ Phoenix/
 
 ### 4.5 ER-диаграмма
 
-См. файл: `er_diagram.md`
+См. файл: [er_diagram.md](https://github.com/Dezaster5/Phoenix/blob/main/er_diagram.md)
 
 Ключевые связи:
 - `Category 1 -> * Service`
@@ -473,7 +473,7 @@ docker compose exec web python manage.py migrate
 
 ## 13. Связанные документы
 
-- Быстрый старт: `README.md`
-- Техническая архитектура backend: `BACKEND_ARCHITECTURE.md`
-- ER диаграмма: `er_diagram.md`
+- Быстрый старт: [README.md](https://github.com/Dezaster5/Phoenix/blob/main/README.md)
+- Техническая архитектура backend: [BACKEND_ARCHITECTURE.md](https://github.com/Dezaster5/Phoenix/blob/main/BACKEND_ARCHITECTURE.md)
+- ER диаграмма: [er_diagram.md](https://github.com/Dezaster5/Phoenix/blob/main/er_diagram.md)
 
