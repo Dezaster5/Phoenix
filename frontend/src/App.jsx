@@ -18,6 +18,10 @@ import {
   apiUpdateAccess,
   apiUpdateCredential
 } from "./api";
+import AdminPanel from "./components/AdminPanel";
+import AppHeader from "./components/AppHeader";
+import AuthPage from "./components/AuthPage";
+import VaultPage from "./components/VaultPage";
 import { demoSections } from "./data/demo";
 
 const accentClass = {
@@ -144,6 +148,7 @@ export default function App() {
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [revealed, setRevealed] = useState({});
   const [copied, setCopied] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
   const [status, setStatus] = useState({ loading: false, error: "", mode: "demo" });
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminDepartments, setAdminDepartments] = useState([]);
@@ -193,6 +198,8 @@ export default function App() {
     expires_at: "",
     department_id: ""
   });
+  const [currentView, setCurrentView] = useState("vault");
+  const [adminTab, setAdminTab] = useState("users");
 
   const isAuthenticated = Boolean(token);
   const isDepartmentHead = isHeadRole(role);
@@ -202,6 +209,20 @@ export default function App() {
     : isDepartmentHead
       ? "Руководитель отдела"
       : "Сотрудник";
+
+  useEffect(() => {
+    if (!canManage && currentView === "admin") {
+      setCurrentView("vault");
+    }
+  }, [canManage, currentView]);
+
+  useEffect(() => {
+    if (!toast.visible) return;
+    const timer = setTimeout(() => {
+      setToast((prev) => ({ ...prev, visible: false }));
+    }, 2200);
+    return () => clearTimeout(timer);
+  }, [toast.visible, toast.message]);
 
   useEffect(() => {
     if (!token) return;
@@ -394,6 +415,8 @@ export default function App() {
       setViewerDepartmentId(Number(data.department?.id || 0));
       setViewerFullName(data.full_name || data.portal_login || "");
       setViewerDepartment(data.department?.name || "Без отдела");
+      setCurrentView("vault");
+      setAdminTab("users");
       setPortalLogin("");
     } catch (err) {
       setStatus({ loading: false, error: err.message, mode: "demo" });
@@ -418,6 +441,8 @@ export default function App() {
     setServiceFilter("all");
     setDepartmentFilter("all");
     setOwnerFilter("all");
+    setCurrentView("vault");
+    setAdminTab("users");
   };
 
   const toggleReveal = (id) => {
@@ -431,6 +456,22 @@ export default function App() {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       setCopied(false);
+    }
+  };
+
+  const showToast = (message, type = "success") => {
+    setToast({ visible: true, message, type });
+  };
+
+  const handleCopyCredentialValue = async (value, label) => {
+    try {
+      if (!value) {
+        throw new Error("empty");
+      }
+      await navigator.clipboard.writeText(String(value));
+      showToast(`${label} скопирован`);
+    } catch {
+      showToast("Не удалось скопировать", "error");
     }
   };
 
@@ -751,793 +792,134 @@ export default function App() {
         <span className="orb orb-three" />
       </div>
 
-      <header className="site-header">
-        <div className="topbar">
-          <div className="brand">
-            <div className="brand-mark">
-              <span className="brand-ring" />
-              <span className="brand-letter">A</span>
-            </div>
-            <div>
-              <div className="brand-title">avatariya</div>
-              <div className="brand-subtitle">vault access</div>
-            </div>
-          </div>
-          <div className="topbar-actions">
-            {isAuthenticated && (
-              <>
-                <div className="role-chip">
-                  Отдел: {viewerDepartment} | ФИО: {viewerFullName || "Без ФИО"} | Роль: {roleLabel}
-                </div>
-                <button className="btn btn-ghost" type="button" onClick={handleLogout}>
-                  Выйти
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <section className="hero">
-        <div className="hero-decor" aria-hidden="true">
-          <span className="hero-ribbon" />
-          <span className="hero-orb" />
-        </div>
-        <div className="hero-info">
-          <div className="tag">внутренний доступ</div>
-          <h1>
-            Все рабочие логины
-            <span>в стиле Avatariya</span>
-          </h1>
-          <p>
-            Phoenix Vault показывает только те сервисы, которые закреплены за вашим
-            профилем. Никаких лишних прав, только нужные доступы и порядок.
-          </p>
-          <div className="hero-stats">
-            <div className="stat-card">
-              <div className="stat-value">{totalServices}</div>
-              <div className="stat-label">Учёток</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-value">{sections.length}</div>
-              <div className="stat-label">Сервисов</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-value">24/7</div>
-              <div className="stat-label">Доступ</div>
-            </div>
-          </div>
-        </div>
-
-        {!isAuthenticated ? (
-          <form className="login-card" onSubmit={handleLogin}>
-            <div className="login-header">
-              <div>
-                <div className="login-title">Вход по логину</div>
-                <div className="login-subtitle">Логин выдаёт руководитель отдела или супер-админ</div>
-              </div>
-              <div className={`mode-chip ${status.mode === "demo" ? "mode-demo" : "mode-live"}`}>
-                {status.mode === "demo" ? "демо" : "онлайн"}
-              </div>
-            </div>
-            <label>
-              Логин Phoenix
-              <input
-                type="text"
-                value={portalLogin}
-                onChange={(event) => setPortalLogin(event.target.value)}
-                placeholder="например, marketing.team"
-              />
-            </label>
-            {status.error && <div className="login-error">{status.error}</div>}
-            <button className="btn btn-primary" type="submit" disabled={status.loading}>
-              {status.loading ? "Проверяем..." : "Войти"}
-            </button>
-            <p className="login-hint">
-              Если логина ещё нет — отправьте запрос руководителю отдела.
-            </p>
-          </form>
-        ) : (
-          <div className="access-card">
-            <div className="access-title">Доступ активен</div>
-            <p>Вы вошли как: {roleLabel}.</p>
-            <div className="access-metrics">
-              <div>
-                <strong>{totalServices}</strong>
-                <span>учёток</span>
-              </div>
-              <div>
-                <strong>{sections.length}</strong>
-                <span>сервисов</span>
-              </div>
-            </div>
-            <button className="btn btn-accent" type="button" onClick={handleLogout}>
-              Выйти из аккаунта
-            </button>
-          </div>
-        )}
-      </section>
+      <AppHeader
+        isAuthenticated={isAuthenticated}
+        viewerDepartment={viewerDepartment}
+        viewerFullName={viewerFullName}
+        roleLabel={roleLabel}
+        canManage={canManage}
+        currentView={currentView}
+        onToggleView={(targetView) => setCurrentView(targetView)}
+        onLogout={handleLogout}
+      />
 
       {!isAuthenticated ? (
-        <section className="request-block">
-          <div className="request-card">
-            <h2>Нет логина?</h2>
-            <p>
-              Отправьте запрос руководителю отдела. Мы подготовили шаблон письма, чтобы
-              быстрее подтвердить доступ.
-            </p>
-            <div className="request-actions">
-              <a
-                className="btn btn-outline"
-                href={`mailto:${requestEmail}?subject=${encodeURIComponent(
-                  requestSubject
-                )}&body=${encodeURIComponent(requestTemplate)}`}
-              >
-                Отправить письмо
-              </a>
-              <button className="btn btn-accent" type="button" onClick={handleCopyTemplate}>
-                {copied ? "Скопировано" : "Скопировать шаблон"}
-              </button>
-            </div>
-            <pre className="request-template">{requestTemplate}</pre>
-          </div>
-        </section>
+        <AuthPage
+          status={status}
+          portalLogin={portalLogin}
+          onPortalLoginChange={setPortalLogin}
+          onLogin={handleLogin}
+          requestEmail={requestEmail}
+          requestSubject={requestSubject}
+          requestTemplate={requestTemplate}
+          copied={copied}
+          onCopyTemplate={handleCopyTemplate}
+        />
+      ) : currentView === "vault" ? (
+        <VaultPage
+          totalServices={totalServices}
+          serviceGroupsCount={sections.length}
+          search={search}
+          onSearchChange={setSearch}
+          serviceFilter={serviceFilter}
+          onServiceFilterChange={setServiceFilter}
+          serviceOptions={serviceOptions}
+          departmentOptions={departmentOptions}
+          departmentFilter={departmentFilter}
+          onDepartmentFilterChange={setDepartmentFilter}
+          ownerOptions={ownerOptions}
+          ownerFilter={ownerFilter}
+          onOwnerFilterChange={setOwnerFilter}
+          filteredSections={filteredSections}
+          accentClass={accentClass}
+          revealed={revealed}
+          onToggleReveal={toggleReveal}
+          onCopyField={handleCopyCredentialValue}
+        />
       ) : (
-        <>
-          <section className="toolbar">
-            <div className="toolbar-left">
-              <h2>Мои сервисы</h2>
-              <span className="subtitle">Доступы, сгруппированные по сервисам</span>
-            </div>
-            <div className="toolbar-right">
-              <div className="search">
-                <input
-                  type="search"
-                  placeholder="Поиск по сервису, логину или ссылке"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-                <span className="search-icon">⌕</span>
-              </div>
-              <div className="view-filters">
-                <select
-                  value={serviceFilter}
-                  onChange={(event) => setServiceFilter(event.target.value)}
-                >
-                  <option value="all">Все сервисы</option>
-                  {serviceOptions.map((service) => (
-                    <option key={service.id} value={service.id}>
-                      {service.name}
-                    </option>
-                  ))}
-                </select>
-                {departmentOptions.length > 1 && (
-                  <select
-                    value={departmentFilter}
-                    onChange={(event) => setDepartmentFilter(event.target.value)}
-                  >
-                    <option value="all">Все отделы</option>
-                    {departmentOptions.map((department) => (
-                      <option key={department} value={department}>
-                        {department}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {ownerOptions.length > 1 && (
-                  <select
-                    value={ownerFilter}
-                    onChange={(event) => setOwnerFilter(event.target.value)}
-                  >
-                    <option value="all">Все сотрудники</option>
-                    {ownerOptions.map((owner) => (
-                      <option key={owner.value} value={owner.value}>
-                        {owner.label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <main className="sections">
-            {filteredSections.length === 0 ? (
-              <div className="empty-state">
-                <h3>Сервисы ещё не назначены</h3>
-                <p>Свяжитесь с руководителем отдела, чтобы получить доступ.</p>
-              </div>
-            ) : (
-              filteredSections.map((section) => (
-                <div
-                  key={section.id}
-                  className={`section ${accentClass[section.accent] || "accent-sky"}`}
-                >
-                  <div className="section-header">
-                    <div>
-                      <h3>{section.name}</h3>
-                      <p>{section.tagline}</p>
-                    </div>
-                    <div className="section-count">{section.services.length} учёток</div>
-                  </div>
-                  <div className="service-grid">
-                    {section.services.map((service) => (
-                      <article key={service.id} className="service-card">
-                        <div className="service-head">
-                          <div className="service-icon">
-                            {(service.owner_login || service.name).slice(0, 1).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="service-name">
-                              {service.owner_name || service.owner_login || "Сотрудник"}
-                            </div>
-                            <div className="service-url">
-                              {service.owner_login || "Без логина"}
-                              {" | "}
-                              Отдел: {service.owner_department || "Без отдела"}
-                            </div>
-                          </div>
-                          <a
-                            className="btn btn-mini"
-                            href={service.url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Открыть
-                          </a>
-                        </div>
-                        <div className="service-body">
-                          <div className="cred">
-                            <span>Логин</span>
-                            <strong>{service.login}</strong>
-                          </div>
-                          <div className="cred">
-                            <span>Пароль</span>
-                            <strong>{revealed[service.id] ? service.password : "••••••••"}</strong>
-                            <button
-                              className="reveal"
-                              type="button"
-                              onClick={() => toggleReveal(service.id)}
-                            >
-                              {revealed[service.id] ? "Скрыть" : "Показать"}
-                            </button>
-                          </div>
-                          {service.notes && <div className="notes">{service.notes}</div>}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </main>
-        </>
-      )}
-
-      {isAuthenticated && canManage && (
-        <section className="admin-panel">
-          <div className="admin-card">
-            <div className="admin-header">
-              <h2>Панель руководителя</h2>
-              <span>Создание сотрудников отдела и выдача логинов</span>
-            </div>
-            <form className="admin-form" onSubmit={handleCreateUser}>
-              <label>
-                ФИО
-                <input
-                  type="text"
-                  value={adminForm.full_name}
-                  onChange={handleAdminChange("full_name")}
-                  placeholder="Например, Иван Иванов"
-                />
-              </label>
-              <label>
-                Почта
-                <input
-                  type="email"
-                  value={adminForm.email}
-                  onChange={handleAdminChange("email")}
-                  placeholder="name@avatariya.com"
-                />
-              </label>
-              <label>
-                Логин Phoenix
-                <div className="login-inline">
-                  <input
-                    type="text"
-                    value={adminForm.portal_login}
-                    onChange={handleAdminChange("portal_login")}
-                    placeholder="например, ivan.ivanov"
-                    required
-                  />
-                  <button className="btn btn-ghost" type="button" onClick={handleGenerateLogin}>
-                    Сгенерировать
-                  </button>
-                </div>
-              </label>
-              {isSuperuser && (
-                <>
-                  <label>
-                    Отдел
-                    <select
-                      value={adminForm.department_id}
-                      onChange={handleAdminChange("department_id")}
-                    >
-                      <option value="">Выберите отдел</option>
-                      {adminDepartments.map((department) => (
-                        <option key={department.id} value={department.id}>
-                          {department.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Роль
-                    <select value={adminForm.role} onChange={handleAdminChange("role")}>
-                      <option value="employee">Сотрудник</option>
-                      <option value="head">Руководитель отдела</option>
-                    </select>
-                  </label>
-                </>
-              )}
-              {adminStatus.error && <div className="login-error">{adminStatus.error}</div>}
-              {adminStatus.success && <div className="admin-success">{adminStatus.success}</div>}
-              <button className="btn btn-primary" type="submit" disabled={adminStatus.loading}>
-                {adminStatus.loading ? "Сохраняем..." : "Создать пользователя"}
-              </button>
-            </form>
-          </div>
-          <div className="admin-card">
-            <div className="admin-header">
-              <h2>Read-only доступ к отделу</h2>
-              <span>Руководитель может выдать просмотр своего отдела другому руководителю</span>
-            </div>
-            <form className="admin-form" onSubmit={handleCreateShare}>
-              {isSuperuser && (
-                <label>
-                  Отдел
-                  <select
-                    value={shareForm.department_id || ""}
-                    onChange={handleShareChange("department_id")}
-                  >
-                    <option value="">Выберите отдел</option>
-                    {adminDepartments.map((department) => (
-                      <option key={department.id} value={department.id}>
-                        {department.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label>
-                Кому выдать (руководитель)
-                <select value={shareForm.grantee_id} onChange={handleShareChange("grantee_id")}>
-                  <option value="">Выберите руководителя</option>
-                  {headCandidates.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.portal_login} {user.full_name ? `(${user.full_name})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Срок действия до
-                <input
-                  type="datetime-local"
-                  value={shareForm.expires_at}
-                  onChange={handleShareChange("expires_at")}
-                />
-              </label>
-              {shareStatus.error && <div className="login-error">{shareStatus.error}</div>}
-              {shareStatus.success && <div className="admin-success">{shareStatus.success}</div>}
-              <button className="btn btn-primary" type="submit" disabled={shareStatus.loading}>
-                {shareStatus.loading ? "Сохраняем..." : "Выдать read-only"}
-              </button>
-            </form>
-            <div className="admin-list">
-              {activeShares.map((share) => (
-                <div key={share.id} className="admin-user">
-                  <div>
-                    <strong>{share.department?.name || "Без отдела"}</strong>
-                    <span>
-                      {share.grantor?.portal_login} -> {share.grantee?.portal_login}
-                    </span>
-                    <span>
-                      Действует до:{" "}
-                      {share.expires_at ? new Date(share.expires_at).toLocaleString("ru-RU") : "-"}
-                    </span>
-                  </div>
-                  <div className="admin-meta">
-                    <span className={`status-pill ${share.is_active ? "active" : "inactive"}`}>
-                      {share.is_active ? "активен" : "выключен"}
-                    </span>
-                    {canRevokeShare(share) && (
-                      <button
-                        className="btn btn-mini danger"
-                        type="button"
-                        onClick={() => handleDeleteShare(share)}
-                      >
-                        Отозвать
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {activeShares.length === 0 && (
-                <div className="empty-state">Read-only доступы к отделам пока не выданы.</div>
-              )}
-            </div>
-          </div>
-          <div className="admin-card">
-            <div className="admin-header">
-              <h2>Доступы к сервисам</h2>
-              <span>Назначьте пользователю доступ к сервису</span>
-            </div>
-            <form className="admin-form" onSubmit={handleCreateAccess}>
-              <label>
-                Сотрудник
-                <select value={accessForm.user_id} onChange={handleAccessChange("user_id")}>
-                  <option value="">Выберите сотрудника</option>
-                  {writableUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.portal_login} {user.full_name ? `(${user.full_name})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Сервис
-                <select value={accessForm.service_id} onChange={handleAccessChange("service_id")}>
-                  <option value="">Выберите сервис</option>
-                  {adminServices.map((service) => (
-                    <option key={service.id} value={service.id}>
-                      {service.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {accessStatus.error && <div className="login-error">{accessStatus.error}</div>}
-              {accessStatus.success && <div className="admin-success">{accessStatus.success}</div>}
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={accessStatus.loading || !accessForm.user_id || !accessForm.service_id}
-              >
-                {accessStatus.loading ? "Назначаем..." : "Назначить доступ"}
-              </button>
-            </form>
-            <div className="admin-filters">
-              <select value={filters.accessUser} onChange={handleFilterChange("accessUser")}>
-                <option value="all">Все сотрудники</option>
-                {writableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.portal_login}
-                  </option>
-                ))}
-              </select>
-              <select value={filters.accessService} onChange={handleFilterChange("accessService")}>
-                <option value="all">Все сервисы</option>
-                {adminServices.map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {service.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="admin-list">
-              {pagedAccesses.map((access) => (
-                <div key={access.id} className="admin-user">
-                  <div>
-                    <strong>{access.user?.portal_login}</strong>
-                    <span>{access.service?.name}</span>
-                    <span>Отдел: {access.user?.department?.name || "Без отдела"}</span>
-                  </div>
-                  <div className="admin-meta">
-                    <span className={`status-pill ${access.is_active ? "active" : "inactive"}`}>
-                      {access.is_active ? "активен" : "выключен"}
-                    </span>
-                    {canWriteForUser(access.user) ? (
-                      <>
-                        <button
-                          className="btn btn-mini"
-                          type="button"
-                          onClick={() => handleToggleAccess(access)}
-                        >
-                          {access.is_active ? "Выключить" : "Включить"}
-                        </button>
-                        <button
-                          className="btn btn-mini danger"
-                          type="button"
-                          onClick={() => handleDeleteAccess(access)}
-                        >
-                          Удалить
-                        </button>
-                      </>
-                    ) : (
-                      <span className="status-pill inactive">read-only</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {filteredAccesses.length === 0 && (
-                <div className="empty-state">Доступы ещё не назначены.</div>
-              )}
-            </div>
-            <div className="admin-pagination">
-              <button
-                className="btn btn-mini"
-                type="button"
-                disabled={accessPage === 1}
-                onClick={() => setAccessPage((prev) => Math.max(1, prev - 1))}
-              >
-                Назад
-              </button>
-              <span>
-                {accessPage} / {accessTotalPages}
-              </span>
-              <button
-                className="btn btn-mini"
-                type="button"
-                disabled={accessPage === accessTotalPages}
-                onClick={() =>
-                  setAccessPage((prev) => Math.min(accessTotalPages, prev + 1))
-                }
-              >
-                Вперёд
-              </button>
-            </div>
-          </div>
-          <div className="admin-card">
-            <div className="admin-header">
-              <h2>Креды сервисов</h2>
-              <span>Логин и пароль для доступа к сервису</span>
-            </div>
-            <form className="admin-form" onSubmit={handleCreateCredential}>
-              <label>
-                Сотрудник
-                <select value={credentialForm.user_id} onChange={handleCredentialChange("user_id")}>
-                  <option value="">Выберите сотрудника</option>
-                  {writableUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.portal_login} {user.full_name ? `(${user.full_name})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Сервис
-                <select
-                  value={credentialForm.service_id}
-                  onChange={handleCredentialChange("service_id")}
-                >
-                  <option value="">Выберите сервис</option>
-                  {adminServices.map((service) => (
-                    <option key={service.id} value={service.id}>
-                      {service.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Логин сервиса
-                <input
-                  type="text"
-                  value={credentialForm.login}
-                  onChange={handleCredentialChange("login")}
-                  placeholder="login@example.com"
-                />
-              </label>
-              <label>
-                Пароль сервиса
-                <input
-                  type="text"
-                  value={credentialForm.password}
-                  onChange={handleCredentialChange("password")}
-                  placeholder="пароль от сервиса"
-                />
-              </label>
-              <label>
-                Примечание
-                <input
-                  type="text"
-                  value={credentialForm.notes}
-                  onChange={handleCredentialChange("notes")}
-                  placeholder="например, доступ только для чтения"
-                />
-              </label>
-              {credentialStatus.error && <div className="login-error">{credentialStatus.error}</div>}
-              {credentialStatus.success && (
-                <div className="admin-success">{credentialStatus.success}</div>
-              )}
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={
-                  credentialStatus.loading ||
-                  !credentialForm.user_id ||
-                  !credentialForm.service_id ||
-                  !credentialForm.login.trim() ||
-                  !credentialForm.password
-                }
-              >
-                {credentialStatus.loading ? "Сохраняем..." : "Сохранить креды"}
-              </button>
-            </form>
-            <div className="admin-filters">
-              <select value={filters.credentialUser} onChange={handleFilterChange("credentialUser")}>
-                <option value="all">Все сотрудники</option>
-                {writableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.portal_login}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={filters.credentialService}
-                onChange={handleFilterChange("credentialService")}
-              >
-                <option value="all">Все сервисы</option>
-                {adminServices.map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {service.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="admin-list">
-              {pagedCredentials.map((credential) => (
-                <div key={credential.id} className="admin-user admin-credential">
-                  <div>
-                    <strong>{credential.user?.portal_login}</strong>
-                    <span>{credential.service?.name}</span>
-                    <span>Отдел: {credential.user?.department?.name || "Без отдела"}</span>
-                  </div>
-                  {editCredentialId === credential.id && canWriteForUser(credential.user) ? (
-                    <div className="admin-edit">
-                      <input
-                        type="text"
-                        value={editCredentialForm.login}
-                        onChange={handleEditCredentialChange("login")}
-                        placeholder="Логин сервиса"
-                      />
-                      <input
-                        type="text"
-                        value={editCredentialForm.password}
-                        onChange={handleEditCredentialChange("password")}
-                        placeholder="Пароль сервиса"
-                      />
-                      <input
-                        type="text"
-                        value={editCredentialForm.notes}
-                        onChange={handleEditCredentialChange("notes")}
-                        placeholder="Примечание"
-                      />
-                    </div>
-                  ) : (
-                    <div className="admin-summary">
-                      <span>Логин: {credential.login}</span>
-                      <span>Пароль: {credential.password}</span>
-                      {credential.notes && <span>Заметка: {credential.notes}</span>}
-                    </div>
-                  )}
-                  <div className="admin-meta">
-                    <span className={`status-pill ${credential.is_active ? "active" : "inactive"}`}>
-                      {credential.is_active ? "активен" : "выключен"}
-                    </span>
-                    {canWriteForUser(credential.user) && editCredentialId === credential.id ? (
-                      <>
-                        <button
-                          className="btn btn-mini"
-                          type="button"
-                          onClick={() => handleSaveCredential(credential)}
-                        >
-                          Сохранить
-                        </button>
-                        <button
-                          className="btn btn-mini danger"
-                          type="button"
-                          onClick={handleCancelEditCredential}
-                        >
-                          Отмена
-                        </button>
-                      </>
-                    ) : canWriteForUser(credential.user) ? (
-                      <>
-                        <button
-                          className="btn btn-mini"
-                          type="button"
-                          onClick={() => handleStartEditCredential(credential)}
-                        >
-                          Изменить
-                        </button>
-                        <button
-                          className="btn btn-mini"
-                          type="button"
-                          onClick={() => handleToggleCredential(credential)}
-                        >
-                          {credential.is_active ? "Выключить" : "Включить"}
-                        </button>
-                        <button
-                          className="btn btn-mini danger"
-                          type="button"
-                          onClick={() => handleDeleteCredential(credential)}
-                        >
-                          Удалить
-                        </button>
-                      </>
-                    ) : (
-                      <span className="status-pill inactive">read-only</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {filteredCredentials.length === 0 && (
-                <div className="empty-state">Креды ещё не добавлены.</div>
-              )}
-            </div>
-            <div className="admin-pagination">
-              <button
-                className="btn btn-mini"
-                type="button"
-                disabled={credentialPage === 1}
-                onClick={() => setCredentialPage((prev) => Math.max(1, prev - 1))}
-              >
-                Назад
-              </button>
-              <span>
-                {credentialPage} / {credentialTotalPages}
-              </span>
-              <button
-                className="btn btn-mini"
-                type="button"
-                disabled={credentialPage === credentialTotalPages}
-                onClick={() =>
-                  setCredentialPage((prev) => Math.min(credentialTotalPages, prev + 1))
-                }
-              >
-                Вперёд
-              </button>
-            </div>
-          </div>
-          <div className="admin-card">
-            <h3>Пользователи</h3>
-            <div className="admin-users">
-              {adminUsers.length === 0 ? (
-                <div className="empty-state">Пользователей пока нет.</div>
-              ) : (
-                adminUsers.map((user) => (
-                  <div key={user.id} className="admin-user">
-                    <div>
-                      <strong>{user.portal_login}</strong>
-                      <span>{user.full_name || "Без имени"}</span>
-                      <span>Отдел: {user.department?.name || "Без отдела"}</span>
-                    </div>
-                    <div className="admin-meta">
-                      <span className="role-pill">
-                        {user.is_superuser
-                          ? "супер-админ"
-                          : isHeadRole(user.role)
-                            ? "руководитель отдела"
-                            : "сотрудник"}
-                      </span>
-                      <span className={`status-pill ${user.is_active ? "active" : "inactive"}`}>
-                        {user.is_active ? "активен" : "неактивен"}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+        <section className="page-title-bar">
+          <h2>Панель руководителя</h2>
+          <span className="subtitle">
+            Управление пользователями, доступами, кредами и read-only доступом к отделу
+          </span>
         </section>
       )}
 
-      <footer className="footer">
-        <div>
-          <strong>Phoenix Vault</strong>
-          <span>Внутренний сервис доступа Avatariya</span>
+      {isAuthenticated && canManage && currentView === "admin" && (
+        <AdminPanel
+          isSuperuser={isSuperuser}
+          adminTab={adminTab}
+          onAdminTabChange={setAdminTab}
+          adminForm={adminForm}
+          onAdminChange={handleAdminChange}
+          onGenerateLogin={handleGenerateLogin}
+          adminDepartments={adminDepartments}
+          adminStatus={adminStatus}
+          onCreateUser={handleCreateUser}
+          shareForm={shareForm}
+          onShareChange={handleShareChange}
+          headCandidates={headCandidates}
+          shareStatus={shareStatus}
+          onCreateShare={handleCreateShare}
+          activeShares={activeShares}
+          canRevokeShare={canRevokeShare}
+          onDeleteShare={handleDeleteShare}
+          accessForm={accessForm}
+          onAccessChange={handleAccessChange}
+          writableUsers={writableUsers}
+          adminServices={adminServices}
+          accessStatus={accessStatus}
+          onCreateAccess={handleCreateAccess}
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          pagedAccesses={pagedAccesses}
+          canWriteForUser={canWriteForUser}
+          onToggleAccess={handleToggleAccess}
+          onDeleteAccess={handleDeleteAccess}
+          filteredAccesses={filteredAccesses}
+          accessPage={accessPage}
+          accessTotalPages={accessTotalPages}
+          setAccessPage={setAccessPage}
+          credentialForm={credentialForm}
+          onCredentialChange={handleCredentialChange}
+          credentialStatus={credentialStatus}
+          onCreateCredential={handleCreateCredential}
+          filteredCredentials={filteredCredentials}
+          pagedCredentials={pagedCredentials}
+          editCredentialId={editCredentialId}
+          editCredentialForm={editCredentialForm}
+          onEditCredentialChange={handleEditCredentialChange}
+          onSaveCredential={handleSaveCredential}
+          onCancelEditCredential={handleCancelEditCredential}
+          onStartEditCredential={handleStartEditCredential}
+          onToggleCredential={handleToggleCredential}
+          onDeleteCredential={handleDeleteCredential}
+          credentialPage={credentialPage}
+          credentialTotalPages={credentialTotalPages}
+          setCredentialPage={setCredentialPage}
+          adminUsers={adminUsers}
+          isHeadRole={isHeadRole}
+        />
+      )}
+
+      {toast.visible && (
+        <div
+          className={`app-toast ${toast.type === "error" ? "error" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {toast.message}
         </div>
-      </footer>
+      )}
+
+      {isAuthenticated && (
+        <footer className="footer">
+          <div>
+            <strong>Phoenix Vault</strong>
+            <span>Внутренний сервис доступа Avatariya</span>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }
