@@ -13,6 +13,21 @@ Credential vault service for company employees (Django + PostgreSQL + React).
 - React + Vite
 - Docker Compose
 
+## Breaking Changes (Departments & Roles)
+- Service categories replaced by departments.
+- Roles changed:
+  - `head` -> department head
+  - `employee` -> employee
+  - super-admin is Django `is_superuser=True`
+- Added cross-department read-only sharing between department heads (`department-shares`).
+
+If you had old data/schema, recreate DB for a clean start:
+```bash
+docker compose down -v
+docker compose up -d --build
+docker compose exec web python manage.py migrate
+```
+
 ## 1) Local Start (Backend in Docker)
 1. Create env files from templates:
 ```bash

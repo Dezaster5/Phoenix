@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .forms import UserChangeForm, UserCreationForm
-from .models import AuditLog, Category, Credential, Service, ServiceAccess, User
+from .models import AuditLog, Credential, Department, DepartmentShare, Service, ServiceAccess, User
 
 
 @admin.register(User)
@@ -11,13 +11,21 @@ class UserAdmin(DjangoUserAdmin):
     form = UserChangeForm
     model = User
     ordering = ("portal_login",)
-    list_display = ("portal_login", "full_name", "role", "is_active", "is_staff", "is_superuser")
-    list_filter = ("role", "is_active", "is_staff", "is_superuser")
-    search_fields = ("portal_login", "full_name", "email")
+    list_display = (
+        "portal_login",
+        "full_name",
+        "department",
+        "role",
+        "is_active",
+        "is_staff",
+        "is_superuser",
+    )
+    list_filter = ("role", "department", "is_active", "is_staff", "is_superuser")
+    search_fields = ("portal_login", "full_name", "email", "department__name")
 
     fieldsets = (
         (None, {"fields": ("portal_login", "password")}),
-        ("Profile", {"fields": ("full_name", "email")}),
+        ("Profile", {"fields": ("full_name", "email", "department")}),
         (
             "Permissions",
             {"fields": ("role", "is_active", "is_staff", "is_superuser", "groups", "user_permissions")},
@@ -34,6 +42,7 @@ class UserAdmin(DjangoUserAdmin):
                     "portal_login",
                     "full_name",
                     "email",
+                    "department",
                     "role",
                     "is_active",
                     "is_staff",
@@ -46,8 +55,8 @@ class UserAdmin(DjangoUserAdmin):
     )
 
 
-@admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
     list_display = ("name", "sort_order", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name",)
@@ -55,8 +64,8 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
-    list_display = ("name", "url", "category", "is_active")
-    list_filter = ("is_active", "category")
+    list_display = ("name", "url", "department", "is_active")
+    list_filter = ("is_active", "department")
     search_fields = ("name", "url")
 
 
@@ -82,3 +91,10 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_filter = ("action", "object_type")
     search_fields = ("actor__portal_login", "object_id")
     readonly_fields = ("created_at",)
+
+
+@admin.register(DepartmentShare)
+class DepartmentShareAdmin(admin.ModelAdmin):
+    list_display = ("department", "grantor", "grantee", "expires_at", "is_active", "created_at")
+    list_filter = ("department", "is_active")
+    search_fields = ("department__name", "grantor__portal_login", "grantee__portal_login")

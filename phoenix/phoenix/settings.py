@@ -105,9 +105,12 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 ALLOW_PASSWORDLESS_LOGIN = os.getenv("ALLOW_PASSWORDLESS_LOGIN", "True") == "True"
-PASSWORDLESS_ROLES = [
-    role for role in os.getenv("PASSWORDLESS_ROLES", "employee,admin").split(",") if role
-]
+PASSWORDLESS_ROLES = []
+for role in os.getenv("PASSWORDLESS_ROLES", "employee,head").split(","):
+    role = role.strip()
+    if not role:
+        continue
+    PASSWORDLESS_ROLES.append("head" if role == "admin" else role)
 
 FERNET_KEY = os.getenv("FERNET_KEY")
 ASYMMETRIC_PUBLIC_KEY = os.getenv("ASYMMETRIC_PUBLIC_KEY")

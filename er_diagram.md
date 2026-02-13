@@ -6,12 +6,14 @@ erDiagram
         varchar email
         varchar full_name
         varchar role
+        bigint department_id FK
         bool is_active
         bool is_staff
+        bool is_superuser
         datetime date_joined
     }
 
-    CATEGORY {
+    DEPARTMENT {
         bigint id PK
         varchar name UK
         int sort_order
@@ -23,7 +25,7 @@ erDiagram
         bigint id PK
         varchar name
         varchar url
-        bigint category_id FK
+        bigint department_id FK
         bool is_active
         datetime created_at
     }
@@ -49,6 +51,17 @@ erDiagram
         datetime updated_at
     }
 
+    DEPARTMENT_SHARE {
+        bigint id PK
+        bigint department_id FK
+        bigint grantor_id FK
+        bigint grantee_id FK
+        datetime expires_at
+        bool is_active
+        datetime created_at
+        datetime updated_at
+    }
+
     AUDIT_LOG {
         bigint id PK
         bigint actor_id FK
@@ -65,20 +78,24 @@ erDiagram
         datetime created
     }
 
+    DEPARTMENT ||--o{ USER : has
+    DEPARTMENT ||--o{ SERVICE : owns
+
     USER ||--o{ SERVICE_ACCESS : has
     SERVICE ||--o{ SERVICE_ACCESS : grants
 
     USER ||--o{ CREDENTIAL : owns
     SERVICE ||--o{ CREDENTIAL : has
 
-    CATEGORY ||--o{ SERVICE : groups
+    USER ||--o{ DEPARTMENT_SHARE : grantor
+    USER ||--o{ DEPARTMENT_SHARE : grantee
+    DEPARTMENT ||--o{ DEPARTMENT_SHARE : shared
 
     USER o|--o{ AUDIT_LOG : acts_as_actor
-
     USER ||--|| AUTH_TOKEN : authenticates
 ```
 
 Notes:
-- `SERVICE_ACCESS` and `CREDENTIAL` both enforce unique `(user_id, service_id)`.
-- `AUDIT_LOG.actor_id` is nullable (`SET_NULL`), so logs survive user deletion.
-- `CREDENTIAL.password_encrypted` is stored encrypted via custom `EncryptedTextField`.
+- `SERVICE_ACCESS` and `CREDENTIAL` enforce unique `(user_id, service_id)`.
+- `DEPARTMENT_SHARE` enforces unique `(department_id, grantor_id, grantee_id)`.
+- `CREDENTIAL.password_encrypted` stored via `EncryptedTextField` (asymmetric envelope encryption if configured).

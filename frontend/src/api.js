@@ -33,12 +33,35 @@ async function apiGet(path, token) {
   return response.json();
 }
 
-export async function apiFetchCredentials(token) {
-  return apiGet("/credentials/", token);
+async function apiWrite(path, token, method, payload, fallbackMessage) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Token ${token}`
+    },
+    body: payload ? JSON.stringify(payload) : undefined
+  });
+
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: fallbackMessage }));
+    const message = typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
+    throw new Error(message || fallbackMessage);
+  }
+
+  if (response.status === 204) {
+    return true;
+  }
+
+  return response.json();
 }
 
-export async function apiFetchCategories(token) {
-  return apiGet("/categories/", token);
+export async function apiFetchMe(token) {
+  return apiGet("/me/", token);
+}
+
+export async function apiFetchCredentials(token) {
+  return apiGet("/credentials/", token);
 }
 
 export async function apiFetchUsers(token) {
@@ -46,27 +69,15 @@ export async function apiFetchUsers(token) {
 }
 
 export async function apiCreateUser(token, payload) {
-  const response = await fetch(`${API_BASE}/users/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Token ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка создания пользователя" }));
-    const message =
-      typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
-    throw new Error(message || "Ошибка создания пользователя");
-  }
-
-  return response.json();
+  return apiWrite("/users/", token, "POST", payload, "Ошибка создания пользователя");
 }
 
 export async function apiFetchServices(token) {
   return apiGet("/services/", token);
+}
+
+export async function apiFetchDepartments(token) {
+  return apiGet("/departments/", token);
 }
 
 export async function apiFetchAccesses(token) {
@@ -74,117 +85,59 @@ export async function apiFetchAccesses(token) {
 }
 
 export async function apiCreateAccess(token, payload) {
-  const response = await fetch(`${API_BASE}/accesses/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Token ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка назначения доступа" }));
-    const message =
-      typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
-    throw new Error(message || "Ошибка назначения доступа");
-  }
-
-  return response.json();
+  return apiWrite("/accesses/", token, "POST", payload, "Ошибка назначения доступа");
 }
 
 export async function apiUpdateAccess(token, id, payload) {
-  const response = await fetch(`${API_BASE}/accesses/${id}/`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Token ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка обновления доступа" }));
-    const message =
-      typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
-    throw new Error(message || "Ошибка обновления доступа");
-  }
-
-  return response.json();
+  return apiWrite(`/accesses/${id}/`, token, "PATCH", payload, "Ошибка обновления доступа");
 }
 
 export async function apiDeleteAccess(token, id) {
-  const response = await fetch(`${API_BASE}/accesses/${id}/`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Token ${token}`
-    }
-  });
-
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка удаления доступа" }));
-    const message =
-      typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
-    throw new Error(message || "Ошибка удаления доступа");
-  }
-
-  return true;
+  return apiWrite(`/accesses/${id}/`, token, "DELETE", null, "Ошибка удаления доступа");
 }
 
 export async function apiCreateCredential(token, payload) {
-  const response = await fetch(`${API_BASE}/credentials/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Token ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка создания кредов" }));
-    const message =
-      typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
-    throw new Error(message || "Ошибка создания кредов");
-  }
-
-  return response.json();
+  return apiWrite("/credentials/", token, "POST", payload, "Ошибка создания кредов");
 }
 
 export async function apiUpdateCredential(token, id, payload) {
-  const response = await fetch(`${API_BASE}/credentials/${id}/`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Token ${token}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка обновления кредов" }));
-    const message =
-      typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
-    throw new Error(message || "Ошибка обновления кредов");
-  }
-
-  return response.json();
+  return apiWrite(`/credentials/${id}/`, token, "PATCH", payload, "Ошибка обновления кредов");
 }
 
 export async function apiDeleteCredential(token, id) {
-  const response = await fetch(`${API_BASE}/credentials/${id}/`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Token ${token}`
-    }
-  });
+  return apiWrite(`/credentials/${id}/`, token, "DELETE", null, "Ошибка удаления кредов");
+}
 
-  if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка удаления кредов" }));
-    const message =
-      typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
-    throw new Error(message || "Ошибка удаления кредов");
-  }
+export async function apiFetchDepartmentShares(token) {
+  return apiGet("/department-shares/", token);
+}
 
-  return true;
+export async function apiCreateDepartmentShare(token, payload) {
+  return apiWrite(
+    "/department-shares/",
+    token,
+    "POST",
+    payload,
+    "Ошибка выдачи доступа к отделу"
+  );
+}
+
+export async function apiUpdateDepartmentShare(token, id, payload) {
+  return apiWrite(
+    `/department-shares/${id}/`,
+    token,
+    "PATCH",
+    payload,
+    "Ошибка обновления доступа к отделу"
+  );
+}
+
+export async function apiDeleteDepartmentShare(token, id) {
+  return apiWrite(
+    `/department-shares/${id}/`,
+    token,
+    "DELETE",
+    null,
+    "Ошибка удаления доступа к отделу"
+  );
 }

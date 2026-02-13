@@ -1,5 +1,9 @@
 # Phoenix Backend Architecture
 
+> Note (2026-02-10): Roles and data model were updated.
+> Current production logic uses `Department`, role `head` / `employee`, super-admin as Django `is_superuser`, and `DepartmentShare` for cross-department read-only visibility.
+> If this document conflicts with code, trust current code in `phoenix/vault/models.py`, `phoenix/vault/views.py`, and `phoenix/vault/serializers.py`.
+
 ## 1. Purpose
 Phoenix backend is a Django + DRF service for:
 - managing employee access to company services;

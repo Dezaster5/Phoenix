@@ -3,7 +3,7 @@ from django.contrib.admin import AdminSite
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .forms import UserChangeForm, UserCreationForm
-from .models import AuditLog, Category, Credential, Service, ServiceAccess, User
+from .models import AuditLog, Credential, Department, DepartmentShare, Service, ServiceAccess, User
 
 
 class CompanyAdminSite(AdminSite):
@@ -13,7 +13,7 @@ class CompanyAdminSite(AdminSite):
 
     def has_permission(self, request):
         user = request.user
-        return bool(user and user.is_active and getattr(user, "is_company_admin", False))
+        return bool(user and user.is_active and user.is_superuser)
 
 
 class CompanyUserAdmin(DjangoUserAdmin):
@@ -67,8 +67,9 @@ class CompanyAuditLogAdmin(admin.ModelAdmin):
 
 company_admin_site = CompanyAdminSite(name="company_admin")
 company_admin_site.register(User, CompanyUserAdmin)
-company_admin_site.register(Category)
+company_admin_site.register(Department)
 company_admin_site.register(Service)
 company_admin_site.register(ServiceAccess)
 company_admin_site.register(Credential)
+company_admin_site.register(DepartmentShare)
 company_admin_site.register(AuditLog, CompanyAuditLogAdmin)

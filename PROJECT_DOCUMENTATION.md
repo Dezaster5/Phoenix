@@ -1,5 +1,9 @@
 # Phoenix: Полная документация проекта
 
+> Важно (2026-02-10): модель ролей и отделов обновлена.
+> Текущая схема: `Department`, роли `head` и `employee`, супер-админ как Django `is_superuser`, межотдельский read-only через `DepartmentShare`.
+> Если где-то в документе остались старые упоминания `admin`/`Category`, ориентируйся на актуальный код в `phoenix/vault/`.
+
 ## 1. Назначение проекта
 
 `Phoenix` - внутренний сервис хранения доступов сотрудников к рабочим системам компании.
@@ -476,4 +480,3 @@ docker compose exec web python manage.py migrate
 - Быстрый старт: [README.md](https://github.com/Dezaster5/Phoenix/blob/main/README.md)
 - Техническая архитектура backend: [BACKEND_ARCHITECTURE.md](https://github.com/Dezaster5/Phoenix/blob/main/BACKEND_ARCHITECTURE.md)
 - ER диаграмма: [er_diagram.md](https://github.com/Dezaster5/Phoenix/blob/main/er_diagram.md)
-

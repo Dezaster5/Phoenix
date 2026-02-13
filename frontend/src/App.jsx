@@ -2,11 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   apiCreateAccess,
   apiCreateCredential,
+  apiCreateDepartmentShare,
   apiCreateUser,
   apiDeleteAccess,
   apiDeleteCredential,
+  apiDeleteDepartmentShare,
   apiFetchAccesses,
   apiFetchCredentials,
+  apiFetchDepartmentShares,
+  apiFetchDepartments,
+  apiFetchMe,
   apiFetchServices,
   apiFetchUsers,
   apiLogin,
@@ -15,36 +20,43 @@ import {
 } from "./api";
 import { demoSections } from "./data/demo";
 
-const formatUrl = (url) => url.replace(/^https?:\/\//, "");
-
 const accentClass = {
   sunset: "accent-sunset",
   sky: "accent-sky",
   mint: "accent-mint"
 };
 
-const groupCredentials = (credentials) => {
+const groupCredentialsByService = (credentials) => {
   const grouped = new Map();
+  const accents = ["sky", "sunset", "mint"];
 
   credentials.forEach((cred) => {
-    const category = cred.service.category || { id: "none", name: "Без категории" };
-    if (!grouped.has(category.id)) {
-      grouped.set(category.id, {
-        id: category.id,
-        name: category.name,
-        tagline: "Назначенные сервисы",
-        accent: "sky",
+    const serviceId = cred.service?.id ?? `service-${cred.id}`;
+    const serviceName = cred.service?.name || "Без названия";
+    const serviceUrl = cred.service?.url || "#";
+    const sectionKey = String(serviceId);
+
+    if (!grouped.has(sectionKey)) {
+      grouped.set(sectionKey, {
+        id: sectionKey,
+        name: serviceName,
+        url: serviceUrl,
+        tagline: "Назначенные учётные записи",
+        accent: accents[grouped.size % accents.length],
         services: []
       });
     }
 
-    grouped.get(category.id).services.push({
+    grouped.get(sectionKey).services.push({
       id: cred.id,
-      name: cred.service.name,
-      url: cred.service.url,
+      name: serviceName,
+      url: serviceUrl,
       login: cred.login,
       password: cred.password,
-      notes: cred.notes
+      notes: cred.notes,
+      owner_login: cred.user?.portal_login || "",
+      owner_name: cred.user?.full_name || "",
+      owner_department: cred.user?.department?.name || "Без отдела"
     });
   });
 
@@ -104,19 +116,41 @@ const toLatin = (value) =>
     .replace(/^\./, "")
     .replace(/\.$/, "");
 
+const isHeadRole = (role) => role === "head" || role === "admin";
+
 export default function App() {
   const [portalLogin, setPortalLogin] = useState("");
   const [token, setToken] = useState(() => localStorage.getItem("phoenixToken") || "");
   const [role, setRole] = useState(localStorage.getItem("phoenixRole") || "employee");
+  const [isSuperuser, setIsSuperuser] = useState(
+    () => localStorage.getItem("phoenixIsSuperuser") === "1"
+  );
+  const [viewerLogin, setViewerLogin] = useState(
+    () => localStorage.getItem("phoenixPortalLogin") || ""
+  );
+  const [viewerDepartmentId, setViewerDepartmentId] = useState(
+    () => Number(localStorage.getItem("phoenixDepartmentId") || 0)
+  );
+  const [viewerFullName, setViewerFullName] = useState(
+    () => localStorage.getItem("phoenixFullName") || ""
+  );
+  const [viewerDepartment, setViewerDepartment] = useState(
+    () => localStorage.getItem("phoenixDepartment") || "Без отдела"
+  );
   const [sections, setSections] = useState(demoSections);
   const [search, setSearch] = useState("");
+  const [serviceFilter, setServiceFilter] = useState("all");
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [revealed, setRevealed] = useState({});
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState({ loading: false, error: "", mode: "demo" });
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminDepartments, setAdminDepartments] = useState([]);
   const [adminServices, setAdminServices] = useState([]);
   const [adminAccesses, setAdminAccesses] = useState([]);
   const [adminCredentials, setAdminCredentials] = useState([]);
+  const [adminShares, setAdminShares] = useState([]);
   const [adminStatus, setAdminStatus] = useState({ loading: false, error: "", success: "" });
   const [accessStatus, setAccessStatus] = useState({ loading: false, error: "", success: "" });
   const [credentialStatus, setCredentialStatus] = useState({
@@ -124,6 +158,7 @@ export default function App() {
     error: "",
     success: ""
   });
+  const [shareStatus, setShareStatus] = useState({ loading: false, error: "", success: "" });
   const [filters, setFilters] = useState({
     accessUser: "all",
     accessService: "all",
@@ -142,7 +177,8 @@ export default function App() {
     portal_login: "",
     full_name: "",
     email: "",
-    role: "employee"
+    role: "employee",
+    department_id: ""
   });
   const [accessForm, setAccessForm] = useState({ user_id: "", service_id: "" });
   const [credentialForm, setCredentialForm] = useState({
@@ -152,9 +188,20 @@ export default function App() {
     password: "",
     notes: ""
   });
+  const [shareForm, setShareForm] = useState({
+    grantee_id: "",
+    expires_at: "",
+    department_id: ""
+  });
 
   const isAuthenticated = Boolean(token);
-  const isAdmin = role === "admin";
+  const isDepartmentHead = isHeadRole(role);
+  const canManage = isSuperuser || isDepartmentHead;
+  const roleLabel = isSuperuser
+    ? "Супер-админ"
+    : isDepartmentHead
+      ? "Руководитель отдела"
+      : "Сотрудник";
 
   useEffect(() => {
     if (!token) return;
@@ -162,8 +209,20 @@ export default function App() {
     const load = async () => {
       try {
         setStatus({ loading: true, error: "", mode: "live" });
-        const credentials = await apiFetchCredentials(token);
-        setSections(groupCredentials(credentials));
+        const [credentials, me] = await Promise.all([apiFetchCredentials(token), apiFetchMe(token)]);
+        setSections(groupCredentialsByService(credentials));
+        setRole(me.role);
+        setIsSuperuser(Boolean(me.is_superuser));
+        setViewerLogin(me.portal_login || "");
+        setViewerDepartmentId(Number(me.department?.id || 0));
+        setViewerFullName(me.full_name || me.portal_login || "");
+        setViewerDepartment(me.department?.name || "Без отдела");
+        localStorage.setItem("phoenixRole", me.role || "employee");
+        localStorage.setItem("phoenixIsSuperuser", me.is_superuser ? "1" : "0");
+        localStorage.setItem("phoenixPortalLogin", me.portal_login || "");
+        localStorage.setItem("phoenixDepartmentId", String(me.department?.id || 0));
+        localStorage.setItem("phoenixFullName", me.full_name || "");
+        localStorage.setItem("phoenixDepartment", me.department?.name || "Без отдела");
       } catch (err) {
         setStatus({ loading: false, error: err.message, mode: "demo" });
         setSections(demoSections);
@@ -176,21 +235,25 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || !isAdmin) return;
+    if (!token || !canManage) return;
 
     const loadUsers = async () => {
       try {
         setAdminStatus({ loading: true, error: "", success: "" });
-        const [users, services, accesses, credentials] = await Promise.all([
+        const [users, departments, services, accesses, credentials, shares] = await Promise.all([
           apiFetchUsers(token),
+          apiFetchDepartments(token),
           apiFetchServices(token),
           apiFetchAccesses(token),
-          apiFetchCredentials(token)
+          apiFetchCredentials(token),
+          apiFetchDepartmentShares(token)
         ]);
         setAdminUsers(Array.isArray(users) ? users : users.results || []);
+        setAdminDepartments(Array.isArray(departments) ? departments : departments.results || []);
         setAdminServices(Array.isArray(services) ? services : services.results || []);
         setAdminAccesses(Array.isArray(accesses) ? accesses : accesses.results || []);
         setAdminCredentials(Array.isArray(credentials) ? credentials : credentials.results || []);
+        setAdminShares(Array.isArray(shares) ? shares : shares.results || []);
         setAdminStatus({ loading: false, error: "", success: "" });
       } catch (err) {
         setAdminStatus({ loading: false, error: err.message, success: "" });
@@ -198,7 +261,7 @@ export default function App() {
     };
 
     loadUsers();
-  }, [token, isAdmin]);
+  }, [token, canManage]);
 
   useEffect(() => {
     setAccessPage(1);
@@ -209,19 +272,107 @@ export default function App() {
   }, [filters.credentialUser, filters.credentialService]);
 
   const filteredSections = useMemo(() => {
-    if (!search.trim()) return sections;
-    const query = search.toLowerCase();
-    return sections
+    const query = search.trim().toLowerCase();
+    const serviceFilterValue = serviceFilter;
+    const departmentFilterValue = departmentFilter;
+    const ownerFilterValue = ownerFilter;
+
+    const sectionScoped = sections.filter(
+      (section) => serviceFilterValue === "all" || String(section.id) === serviceFilterValue
+    );
+
+    if (!query && departmentFilterValue === "all" && ownerFilterValue === "all") {
+      return sectionScoped;
+    }
+
+    return sectionScoped
       .map((section) => ({
         ...section,
-        services: section.services.filter((service) =>
-          [service.name, service.url, service.login].some((field) =>
-            field.toLowerCase().includes(query)
-          )
-        )
+        services: section.services.filter((service) => {
+          const byDepartment =
+            departmentFilterValue === "all" ||
+            (service.owner_department || "Без отдела") === departmentFilterValue;
+          const byOwner = ownerFilterValue === "all" || service.owner_login === ownerFilterValue;
+          const byQuery =
+            !query ||
+            [
+              section.name,
+              service.name,
+              service.url,
+              service.login,
+              service.owner_login,
+              service.owner_name,
+              service.owner_department,
+              service.notes
+            ]
+              .filter(Boolean)
+              .some((field) => String(field).toLowerCase().includes(query));
+          return byDepartment && byOwner && byQuery;
+        })
       }))
       .filter((section) => section.services.length > 0);
-  }, [sections, search]);
+  }, [sections, search, serviceFilter, departmentFilter, ownerFilter]);
+
+  const serviceOptions = useMemo(
+    () =>
+      sections.map((section) => ({
+        id: String(section.id),
+        name: section.name
+      })),
+    [sections]
+  );
+
+  const departmentOptions = useMemo(() => {
+    const unique = new Set();
+    sections.forEach((section) => {
+      section.services.forEach((service) => {
+        unique.add(service.owner_department || "Без отдела");
+      });
+    });
+    return Array.from(unique).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [sections]);
+
+  const ownerOptions = useMemo(() => {
+    const unique = new Map();
+    sections.forEach((section) => {
+      section.services.forEach((service) => {
+        const login = service.owner_login;
+        if (!login) return;
+        if (!unique.has(login)) {
+          unique.set(login, service.owner_name ? `${login} (${service.owner_name})` : login);
+        }
+      });
+    });
+    return Array.from(unique.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  }, [sections]);
+
+  useEffect(() => {
+    if (serviceFilter !== "all" && !serviceOptions.some((option) => option.id === serviceFilter)) {
+      setServiceFilter("all");
+    }
+  }, [serviceFilter, serviceOptions]);
+
+  useEffect(() => {
+    if (departmentFilter !== "all" && !departmentOptions.includes(departmentFilter)) {
+      setDepartmentFilter("all");
+    }
+  }, [departmentFilter, departmentOptions]);
+
+  useEffect(() => {
+    if (ownerFilter !== "all" && !ownerOptions.some((option) => option.value === ownerFilter)) {
+      setOwnerFilter("all");
+    }
+  }, [ownerFilter, ownerOptions]);
+
+  useEffect(() => {
+    if (!token) {
+      setServiceFilter("all");
+      setDepartmentFilter("all");
+      setOwnerFilter("all");
+    }
+  }, [token]);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -231,8 +382,18 @@ export default function App() {
       const data = await apiLogin(portalLogin);
       localStorage.setItem("phoenixToken", data.token);
       localStorage.setItem("phoenixRole", data.role);
+      localStorage.setItem("phoenixIsSuperuser", data.is_superuser ? "1" : "0");
+      localStorage.setItem("phoenixPortalLogin", data.portal_login || "");
+      localStorage.setItem("phoenixDepartmentId", String(data.department?.id || 0));
+      localStorage.setItem("phoenixFullName", data.full_name || "");
+      localStorage.setItem("phoenixDepartment", data.department?.name || "Без отдела");
       setToken(data.token);
       setRole(data.role);
+      setIsSuperuser(Boolean(data.is_superuser));
+      setViewerLogin(data.portal_login || "");
+      setViewerDepartmentId(Number(data.department?.id || 0));
+      setViewerFullName(data.full_name || data.portal_login || "");
+      setViewerDepartment(data.department?.name || "Без отдела");
       setPortalLogin("");
     } catch (err) {
       setStatus({ loading: false, error: err.message, mode: "demo" });
@@ -242,8 +403,21 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem("phoenixToken");
     localStorage.removeItem("phoenixRole");
+    localStorage.removeItem("phoenixIsSuperuser");
+    localStorage.removeItem("phoenixPortalLogin");
+    localStorage.removeItem("phoenixDepartmentId");
+    localStorage.removeItem("phoenixFullName");
+    localStorage.removeItem("phoenixDepartment");
     setToken("");
     setRole("employee");
+    setIsSuperuser(false);
+    setViewerLogin("");
+    setViewerDepartmentId(0);
+    setViewerFullName("");
+    setViewerDepartment("Без отдела");
+    setServiceFilter("all");
+    setDepartmentFilter("all");
+    setOwnerFilter("all");
   };
 
   const toggleReveal = (id) => {
@@ -281,16 +455,26 @@ export default function App() {
     event.preventDefault();
     setAdminStatus({ loading: true, error: "", success: "" });
     try {
+      if (isSuperuser && !adminForm.department_id) {
+        throw new Error("Выберите отдел.");
+      }
       const payload = {
         portal_login: adminForm.portal_login.trim(),
         full_name: adminForm.full_name.trim(),
         email: adminForm.email.trim(),
-        role: adminForm.role,
+        role: isSuperuser ? adminForm.role : "employee",
+        department_id: isSuperuser ? Number(adminForm.department_id) : undefined,
         is_active: true
       };
       const created = await apiCreateUser(token, payload);
       setAdminUsers((prev) => [created, ...prev]);
-      setAdminForm({ portal_login: "", full_name: "", email: "", role: "employee" });
+      setAdminForm({
+        portal_login: "",
+        full_name: "",
+        email: "",
+        role: "employee",
+        department_id: ""
+      });
       setAdminStatus({ loading: false, error: "", success: "Пользователь создан" });
     } catch (err) {
       setAdminStatus({ loading: false, error: err.message, success: "" });
@@ -303,6 +487,52 @@ export default function App() {
 
   const handleCredentialChange = (field) => (event) => {
     setCredentialForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleShareChange = (field) => (event) => {
+    setShareForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleCreateShare = async (event) => {
+    event.preventDefault();
+    setShareStatus({ loading: true, error: "", success: "" });
+    try {
+      if (!shareForm.grantee_id || !shareForm.expires_at) {
+        throw new Error("Укажите руководителя и срок действия.");
+      }
+      const payload = {
+        grantee_id: Number(shareForm.grantee_id),
+        expires_at: new Date(shareForm.expires_at).toISOString()
+      };
+      if (isSuperuser) {
+        if (!shareForm.department_id) {
+          throw new Error("Выберите отдел.");
+        }
+        payload.department_id = Number(shareForm.department_id);
+      }
+      await apiCreateDepartmentShare(token, payload);
+      const refreshed = await apiFetchDepartmentShares(token);
+      setAdminShares(Array.isArray(refreshed) ? refreshed : refreshed.results || []);
+      setShareForm({ grantee_id: "", expires_at: "", department_id: "" });
+      setShareStatus({
+        loading: false,
+        error: "",
+        success: "Read-only доступ к отделу выдан."
+      });
+    } catch (err) {
+      setShareStatus({ loading: false, error: err.message, success: "" });
+    }
+  };
+
+  const handleDeleteShare = async (share) => {
+    setShareStatus({ loading: true, error: "", success: "" });
+    try {
+      await apiDeleteDepartmentShare(token, share.id);
+      setAdminShares((prev) => prev.filter((item) => item.id !== share.id));
+      setShareStatus({ loading: false, error: "", success: "Доступ к отделу отозван." });
+    } catch (err) {
+      setShareStatus({ loading: false, error: err.message, success: "" });
+    }
   };
 
   const handleCreateAccess = async (event) => {
@@ -475,6 +705,31 @@ export default function App() {
     credentialStart,
     credentialStart + PAGE_SIZE
   );
+  const headCandidates = adminUsers.filter(
+    (user) => isHeadRole(user.role) && !user.is_superuser && user.portal_login !== viewerLogin
+  );
+  const writableUsers = adminUsers.filter((user) => {
+    if (user.is_superuser) {
+      return false;
+    }
+    if (isSuperuser) {
+      return true;
+    }
+    return Number(user.department?.id || 0) === viewerDepartmentId;
+  });
+  const canWriteForUser = (user) => {
+    if (isSuperuser) {
+      return true;
+    }
+    return Number(user?.department?.id || 0) === viewerDepartmentId;
+  };
+  const canRevokeShare = (share) =>
+    isSuperuser || Number(share.department?.id || 0) === viewerDepartmentId;
+  const activeShares = adminShares.filter(
+    (share) =>
+      share.is_active &&
+      (!share.expires_at || new Date(share.expires_at).getTime() > Date.now())
+  );
 
   useEffect(() => {
     if (accessPage > accessTotalPages) {
@@ -511,7 +766,9 @@ export default function App() {
           <div className="topbar-actions">
             {isAuthenticated && (
               <>
-                <div className="role-chip">Роль: {role === "admin" ? "админ" : "сотрудник"}</div>
+                <div className="role-chip">
+                  Отдел: {viewerDepartment} | ФИО: {viewerFullName || "Без ФИО"} | Роль: {roleLabel}
+                </div>
                 <button className="btn btn-ghost" type="button" onClick={handleLogout}>
                   Выйти
                 </button>
@@ -539,11 +796,11 @@ export default function App() {
           <div className="hero-stats">
             <div className="stat-card">
               <div className="stat-value">{totalServices}</div>
-              <div className="stat-label">Сервисов</div>
+              <div className="stat-label">Учёток</div>
             </div>
             <div className="stat-card">
               <div className="stat-value">{sections.length}</div>
-              <div className="stat-label">Категорий</div>
+              <div className="stat-label">Сервисов</div>
             </div>
             <div className="stat-card">
               <div className="stat-value">24/7</div>
@@ -557,7 +814,7 @@ export default function App() {
             <div className="login-header">
               <div>
                 <div className="login-title">Вход по логину</div>
-                <div className="login-subtitle">Логин выдаёт администратор</div>
+                <div className="login-subtitle">Логин выдаёт руководитель отдела или супер-админ</div>
               </div>
               <div className={`mode-chip ${status.mode === "demo" ? "mode-demo" : "mode-live"}`}>
                 {status.mode === "demo" ? "демо" : "онлайн"}
@@ -577,21 +834,21 @@ export default function App() {
               {status.loading ? "Проверяем..." : "Войти"}
             </button>
             <p className="login-hint">
-              Если логина ещё нет — отправьте запрос администратору.
+              Если логина ещё нет — отправьте запрос руководителю отдела.
             </p>
           </form>
         ) : (
           <div className="access-card">
             <div className="access-title">Доступ активен</div>
-            <p>Вы вошли как {role === "admin" ? "админ" : "сотрудник"}.</p>
+            <p>Вы вошли как: {roleLabel}.</p>
             <div className="access-metrics">
               <div>
                 <strong>{totalServices}</strong>
-                <span>сервисов</span>
+                <span>учёток</span>
               </div>
               <div>
                 <strong>{sections.length}</strong>
-                <span>категорий</span>
+                <span>сервисов</span>
               </div>
             </div>
             <button className="btn btn-accent" type="button" onClick={handleLogout}>
@@ -606,7 +863,7 @@ export default function App() {
           <div className="request-card">
             <h2>Нет логина?</h2>
             <p>
-              Отправьте запрос администратору. Мы подготовили шаблон письма, чтобы
+              Отправьте запрос руководителю отдела. Мы подготовили шаблон письма, чтобы
               быстрее подтвердить доступ.
             </p>
             <div className="request-actions">
@@ -630,7 +887,7 @@ export default function App() {
           <section className="toolbar">
             <div className="toolbar-left">
               <h2>Мои сервисы</h2>
-              <span className="subtitle">Доступы, назначенные вашему профилю</span>
+              <span className="subtitle">Доступы, сгруппированные по сервисам</span>
             </div>
             <div className="toolbar-right">
               <div className="search">
@@ -642,6 +899,45 @@ export default function App() {
                 />
                 <span className="search-icon">⌕</span>
               </div>
+              <div className="view-filters">
+                <select
+                  value={serviceFilter}
+                  onChange={(event) => setServiceFilter(event.target.value)}
+                >
+                  <option value="all">Все сервисы</option>
+                  {serviceOptions.map((service) => (
+                    <option key={service.id} value={service.id}>
+                      {service.name}
+                    </option>
+                  ))}
+                </select>
+                {departmentOptions.length > 1 && (
+                  <select
+                    value={departmentFilter}
+                    onChange={(event) => setDepartmentFilter(event.target.value)}
+                  >
+                    <option value="all">Все отделы</option>
+                    {departmentOptions.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {ownerOptions.length > 1 && (
+                  <select
+                    value={ownerFilter}
+                    onChange={(event) => setOwnerFilter(event.target.value)}
+                  >
+                    <option value="all">Все сотрудники</option>
+                    {ownerOptions.map((owner) => (
+                      <option key={owner.value} value={owner.value}>
+                        {owner.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </div>
           </section>
 
@@ -649,7 +945,7 @@ export default function App() {
             {filteredSections.length === 0 ? (
               <div className="empty-state">
                 <h3>Сервисы ещё не назначены</h3>
-                <p>Свяжитесь с администратором, чтобы получить доступ.</p>
+                <p>Свяжитесь с руководителем отдела, чтобы получить доступ.</p>
               </div>
             ) : (
               filteredSections.map((section) => (
@@ -662,16 +958,24 @@ export default function App() {
                       <h3>{section.name}</h3>
                       <p>{section.tagline}</p>
                     </div>
-                    <div className="section-count">{section.services.length} сервиса</div>
+                    <div className="section-count">{section.services.length} учёток</div>
                   </div>
                   <div className="service-grid">
                     {section.services.map((service) => (
                       <article key={service.id} className="service-card">
                         <div className="service-head">
-                          <div className="service-icon">{service.name.slice(0, 1)}</div>
+                          <div className="service-icon">
+                            {(service.owner_login || service.name).slice(0, 1).toUpperCase()}
+                          </div>
                           <div>
-                            <div className="service-name">{service.name}</div>
-                            <div className="service-url">{formatUrl(service.url)}</div>
+                            <div className="service-name">
+                              {service.owner_name || service.owner_login || "Сотрудник"}
+                            </div>
+                            <div className="service-url">
+                              {service.owner_login || "Без логина"}
+                              {" | "}
+                              Отдел: {service.owner_department || "Без отдела"}
+                            </div>
                           </div>
                           <a
                             className="btn btn-mini"
@@ -710,12 +1014,12 @@ export default function App() {
         </>
       )}
 
-      {isAuthenticated && isAdmin && (
+      {isAuthenticated && canManage && (
         <section className="admin-panel">
           <div className="admin-card">
             <div className="admin-header">
-              <h2>Админ панель</h2>
-              <span>Создание сотрудников и выдача логинов</span>
+              <h2>Панель руководителя</h2>
+              <span>Создание сотрудников отдела и выдача логинов</span>
             </div>
             <form className="admin-form" onSubmit={handleCreateUser}>
               <label>
@@ -751,19 +1055,118 @@ export default function App() {
                   </button>
                 </div>
               </label>
-              <label>
-                Роль
-                <select value={adminForm.role} onChange={handleAdminChange("role")}>
-                  <option value="employee">Сотрудник</option>
-                  <option value="admin">Админ</option>
-                </select>
-              </label>
+              {isSuperuser && (
+                <>
+                  <label>
+                    Отдел
+                    <select
+                      value={adminForm.department_id}
+                      onChange={handleAdminChange("department_id")}
+                    >
+                      <option value="">Выберите отдел</option>
+                      {adminDepartments.map((department) => (
+                        <option key={department.id} value={department.id}>
+                          {department.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Роль
+                    <select value={adminForm.role} onChange={handleAdminChange("role")}>
+                      <option value="employee">Сотрудник</option>
+                      <option value="head">Руководитель отдела</option>
+                    </select>
+                  </label>
+                </>
+              )}
               {adminStatus.error && <div className="login-error">{adminStatus.error}</div>}
               {adminStatus.success && <div className="admin-success">{adminStatus.success}</div>}
               <button className="btn btn-primary" type="submit" disabled={adminStatus.loading}>
                 {adminStatus.loading ? "Сохраняем..." : "Создать пользователя"}
               </button>
             </form>
+          </div>
+          <div className="admin-card">
+            <div className="admin-header">
+              <h2>Read-only доступ к отделу</h2>
+              <span>Руководитель может выдать просмотр своего отдела другому руководителю</span>
+            </div>
+            <form className="admin-form" onSubmit={handleCreateShare}>
+              {isSuperuser && (
+                <label>
+                  Отдел
+                  <select
+                    value={shareForm.department_id || ""}
+                    onChange={handleShareChange("department_id")}
+                  >
+                    <option value="">Выберите отдел</option>
+                    {adminDepartments.map((department) => (
+                      <option key={department.id} value={department.id}>
+                        {department.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label>
+                Кому выдать (руководитель)
+                <select value={shareForm.grantee_id} onChange={handleShareChange("grantee_id")}>
+                  <option value="">Выберите руководителя</option>
+                  {headCandidates.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.portal_login} {user.full_name ? `(${user.full_name})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Срок действия до
+                <input
+                  type="datetime-local"
+                  value={shareForm.expires_at}
+                  onChange={handleShareChange("expires_at")}
+                />
+              </label>
+              {shareStatus.error && <div className="login-error">{shareStatus.error}</div>}
+              {shareStatus.success && <div className="admin-success">{shareStatus.success}</div>}
+              <button className="btn btn-primary" type="submit" disabled={shareStatus.loading}>
+                {shareStatus.loading ? "Сохраняем..." : "Выдать read-only"}
+              </button>
+            </form>
+            <div className="admin-list">
+              {activeShares.map((share) => (
+                <div key={share.id} className="admin-user">
+                  <div>
+                    <strong>{share.department?.name || "Без отдела"}</strong>
+                    <span>
+                      {share.grantor?.portal_login} -> {share.grantee?.portal_login}
+                    </span>
+                    <span>
+                      Действует до:{" "}
+                      {share.expires_at ? new Date(share.expires_at).toLocaleString("ru-RU") : "-"}
+                    </span>
+                  </div>
+                  <div className="admin-meta">
+                    <span className={`status-pill ${share.is_active ? "active" : "inactive"}`}>
+                      {share.is_active ? "активен" : "выключен"}
+                    </span>
+                    {canRevokeShare(share) && (
+                      <button
+                        className="btn btn-mini danger"
+                        type="button"
+                        onClick={() => handleDeleteShare(share)}
+                      >
+                        Отозвать
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {activeShares.length === 0 && (
+                <div className="empty-state">Read-only доступы к отделам пока не выданы.</div>
+              )}
+            </div>
           </div>
           <div className="admin-card">
             <div className="admin-header">
@@ -775,7 +1178,7 @@ export default function App() {
                 Сотрудник
                 <select value={accessForm.user_id} onChange={handleAccessChange("user_id")}>
                   <option value="">Выберите сотрудника</option>
-                  {adminUsers.map((user) => (
+                  {writableUsers.map((user) => (
                     <option key={user.id} value={user.id}>
                       {user.portal_login} {user.full_name ? `(${user.full_name})` : ""}
                     </option>
@@ -806,7 +1209,7 @@ export default function App() {
             <div className="admin-filters">
               <select value={filters.accessUser} onChange={handleFilterChange("accessUser")}>
                 <option value="all">Все сотрудники</option>
-                {adminUsers.map((user) => (
+                {writableUsers.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.portal_login}
                   </option>
@@ -827,25 +1230,32 @@ export default function App() {
                   <div>
                     <strong>{access.user?.portal_login}</strong>
                     <span>{access.service?.name}</span>
+                    <span>Отдел: {access.user?.department?.name || "Без отдела"}</span>
                   </div>
                   <div className="admin-meta">
                     <span className={`status-pill ${access.is_active ? "active" : "inactive"}`}>
                       {access.is_active ? "активен" : "выключен"}
                     </span>
-                    <button
-                      className="btn btn-mini"
-                      type="button"
-                      onClick={() => handleToggleAccess(access)}
-                    >
-                      {access.is_active ? "Выключить" : "Включить"}
-                    </button>
-                    <button
-                      className="btn btn-mini danger"
-                      type="button"
-                      onClick={() => handleDeleteAccess(access)}
-                    >
-                      Удалить
-                    </button>
+                    {canWriteForUser(access.user) ? (
+                      <>
+                        <button
+                          className="btn btn-mini"
+                          type="button"
+                          onClick={() => handleToggleAccess(access)}
+                        >
+                          {access.is_active ? "Выключить" : "Включить"}
+                        </button>
+                        <button
+                          className="btn btn-mini danger"
+                          type="button"
+                          onClick={() => handleDeleteAccess(access)}
+                        >
+                          Удалить
+                        </button>
+                      </>
+                    ) : (
+                      <span className="status-pill inactive">read-only</span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -887,7 +1297,7 @@ export default function App() {
                 Сотрудник
                 <select value={credentialForm.user_id} onChange={handleCredentialChange("user_id")}>
                   <option value="">Выберите сотрудника</option>
-                  {adminUsers.map((user) => (
+                  {writableUsers.map((user) => (
                     <option key={user.id} value={user.id}>
                       {user.portal_login} {user.full_name ? `(${user.full_name})` : ""}
                     </option>
@@ -956,7 +1366,7 @@ export default function App() {
             <div className="admin-filters">
               <select value={filters.credentialUser} onChange={handleFilterChange("credentialUser")}>
                 <option value="all">Все сотрудники</option>
-                {adminUsers.map((user) => (
+                {writableUsers.map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.portal_login}
                   </option>
@@ -980,8 +1390,9 @@ export default function App() {
                   <div>
                     <strong>{credential.user?.portal_login}</strong>
                     <span>{credential.service?.name}</span>
+                    <span>Отдел: {credential.user?.department?.name || "Без отдела"}</span>
                   </div>
-                  {editCredentialId === credential.id ? (
+                  {editCredentialId === credential.id && canWriteForUser(credential.user) ? (
                     <div className="admin-edit">
                       <input
                         type="text"
@@ -1013,7 +1424,7 @@ export default function App() {
                     <span className={`status-pill ${credential.is_active ? "active" : "inactive"}`}>
                       {credential.is_active ? "активен" : "выключен"}
                     </span>
-                    {editCredentialId === credential.id ? (
+                    {canWriteForUser(credential.user) && editCredentialId === credential.id ? (
                       <>
                         <button
                           className="btn btn-mini"
@@ -1030,7 +1441,7 @@ export default function App() {
                           Отмена
                         </button>
                       </>
-                    ) : (
+                    ) : canWriteForUser(credential.user) ? (
                       <>
                         <button
                           className="btn btn-mini"
@@ -1054,6 +1465,8 @@ export default function App() {
                           Удалить
                         </button>
                       </>
+                    ) : (
+                      <span className="status-pill inactive">read-only</span>
                     )}
                   </div>
                 </div>
@@ -1097,10 +1510,15 @@ export default function App() {
                     <div>
                       <strong>{user.portal_login}</strong>
                       <span>{user.full_name || "Без имени"}</span>
+                      <span>Отдел: {user.department?.name || "Без отдела"}</span>
                     </div>
                     <div className="admin-meta">
                       <span className="role-pill">
-                        {user.role === "admin" ? "админ" : "сотрудник"}
+                        {user.is_superuser
+                          ? "супер-админ"
+                          : isHeadRole(user.role)
+                            ? "руководитель отдела"
+                            : "сотрудник"}
                       </span>
                       <span className={`status-pill ${user.is_active ? "active" : "inactive"}`}>
                         {user.is_active ? "активен" : "неактивен"}

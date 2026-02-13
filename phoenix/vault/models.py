@@ -43,7 +43,7 @@ class UserManager(BaseUserManager):
     def create_superuser(self, portal_login, password, **extra_fields):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
-        extra_fields.setdefault("role", User.Role.ADMIN)
+        extra_fields.setdefault("role", User.Role.HEAD)
 
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True")
@@ -57,13 +57,16 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     class Role(models.TextChoices):
-        ADMIN = "admin", "Admin"
+        HEAD = "head", "Department Head"
         EMPLOYEE = "employee", "Employee"
 
     portal_login = models.CharField(max_length=64, unique=True)
     email = models.EmailField(blank=True)
     full_name = models.CharField(max_length=128, blank=True)
     role = models.CharField(max_length=16, choices=Role.choices, default=Role.EMPLOYEE)
+    department = models.ForeignKey(
+        "Department", on_delete=models.SET_NULL, null=True, blank=True, related_name="users"
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
@@ -79,7 +82,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def is_company_admin(self) -> bool:
-        return self.role == self.Role.ADMIN
+        return self.is_superuser or self.role in (self.Role.HEAD, "admin")
+
+    @property
+    def is_department_head(self) -> bool:
+        return self.role in (self.Role.HEAD, "admin")
 
     def get_full_name(self):
         return self.full_name or self.portal_login
@@ -88,7 +95,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.portal_login
 
 
-class Category(models.Model):
+class Department(models.Model):
     name = models.CharField(max_length=120, unique=True)
     sort_order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -104,8 +111,8 @@ class Category(models.Model):
 class Service(models.Model):
     name = models.CharField(max_length=200)
     url = models.URLField(max_length=500)
-    category = models.ForeignKey(
-        Category, on_delete=models.SET_NULL, null=True, blank=True, related_name="services"
+    department = models.ForeignKey(
+        Department, on_delete=models.SET_NULL, null=True, blank=True, related_name="services"
     )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -176,3 +183,24 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.object_type} {self.object_id}"
+
+
+class DepartmentShare(models.Model):
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="shares")
+    grantor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="granted_department_shares"
+    )
+    grantee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="received_department_shares"
+    )
+    expires_at = models.DateTimeField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = ("department", "grantor", "grantee")
+
+    def __str__(self):
+        return f"{self.grantor.portal_login} -> {self.grantee.portal_login} ({self.department.name})"
