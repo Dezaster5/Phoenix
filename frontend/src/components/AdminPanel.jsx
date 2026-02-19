@@ -16,22 +16,11 @@ export default function AdminPanel({
   activeShares,
   canRevokeShare,
   onDeleteShare,
-  accessForm,
-  onAccessChange,
   writableUsers,
   adminServices,
-  accessStatus,
-  onCreateAccess,
   filters,
   onFilterChange,
-  pagedAccesses,
   canWriteForUser,
-  onToggleAccess,
-  onDeleteAccess,
-  filteredAccesses,
-  accessPage,
-  accessTotalPages,
-  setAccessPage,
   credentialForm,
   onCredentialChange,
   credentialStatus,
@@ -50,15 +39,32 @@ export default function AdminPanel({
   credentialTotalPages,
   setCredentialPage,
   adminUsers,
-  isHeadRole
+  isHeadRole,
+  accessRequests,
+  accessRequestsTotal,
+  accessRequestStatus,
+  onApproveAccessRequest,
+  onRejectAccessRequest,
+  reviewComments,
+  onReviewCommentChange,
+  reviewRequestFilters,
+  reviewRequestServiceOptions,
+  onReviewRequestFilterChange,
+  onExportAccessRequestsCsv
 }) {
   const tabs = [
     { id: "users", label: "Пользователи" },
     { id: "shares", label: "Read-only" },
-    { id: "accesses", label: "Доступы" },
     { id: "credentials", label: "Креды" },
+    { id: "requests", label: "Заявки" },
     { id: "directory", label: "Список" }
   ];
+  const requestStatusLabel = {
+    pending: "ожидает",
+    approved: "одобрен",
+    rejected: "отклонен",
+    canceled: "отменен"
+  };
 
   return (
     <section className="admin-panel-shell">
@@ -220,116 +226,6 @@ export default function AdminPanel({
           {activeShares.length === 0 && (
             <div className="empty-state">Read-only доступы к отделам пока не выданы.</div>
           )}
-        </div>
-          </div>
-        )}
-
-        {adminTab === "accesses" && (
-          <div className="admin-card">
-        <div className="admin-header">
-          <h2>Доступы к сервисам</h2>
-          <span>Назначьте пользователю доступ к сервису</span>
-        </div>
-        <form className="admin-form" onSubmit={onCreateAccess}>
-          <label>
-            Сотрудник
-            <select value={accessForm.user_id} onChange={onAccessChange("user_id")}>
-              <option value="">Выберите сотрудника</option>
-              {writableUsers.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.portal_login} {user.full_name ? `(${user.full_name})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Сервис
-            <select value={accessForm.service_id} onChange={onAccessChange("service_id")}>
-              <option value="">Выберите сервис</option>
-              {adminServices.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {accessStatus.error && <div className="login-error">{accessStatus.error}</div>}
-          {accessStatus.success && <div className="admin-success">{accessStatus.success}</div>}
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={accessStatus.loading || !accessForm.user_id || !accessForm.service_id}
-          >
-            {accessStatus.loading ? "Назначаем..." : "Назначить доступ"}
-          </button>
-        </form>
-        <div className="admin-filters">
-          <select value={filters.accessUser} onChange={onFilterChange("accessUser")}>
-            <option value="all">Все сотрудники</option>
-            {writableUsers.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.portal_login}
-              </option>
-            ))}
-          </select>
-          <select value={filters.accessService} onChange={onFilterChange("accessService")}>
-            <option value="all">Все сервисы</option>
-            {adminServices.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="admin-list">
-          {pagedAccesses.map((access) => (
-            <div key={access.id} className="admin-user">
-              <div>
-                <strong>{access.user?.portal_login}</strong>
-                <span>{access.service?.name}</span>
-                <span>Отдел: {access.user?.department?.name || "Без отдела"}</span>
-              </div>
-              <div className="admin-meta">
-                <span className={`status-pill ${access.is_active ? "active" : "inactive"}`}>
-                  {access.is_active ? "активен" : "выключен"}
-                </span>
-                {canWriteForUser(access.user) ? (
-                  <>
-                    <button className="btn btn-mini" type="button" onClick={() => onToggleAccess(access)}>
-                      {access.is_active ? "Выключить" : "Включить"}
-                    </button>
-                    <button className="btn btn-mini danger" type="button" onClick={() => onDeleteAccess(access)}>
-                      Удалить
-                    </button>
-                  </>
-                ) : (
-                  <span className="status-pill inactive">read-only</span>
-                )}
-              </div>
-            </div>
-          ))}
-          {filteredAccesses.length === 0 && <div className="empty-state">Доступы ещё не назначены.</div>}
-        </div>
-        <div className="admin-pagination">
-          <button
-            className="btn btn-mini"
-            type="button"
-            disabled={accessPage === 1}
-            onClick={() => setAccessPage((prev) => Math.max(1, prev - 1))}
-          >
-            Назад
-          </button>
-          <span>
-            {accessPage} / {accessTotalPages}
-          </span>
-          <button
-            className="btn btn-mini"
-            type="button"
-            disabled={accessPage === accessTotalPages}
-            onClick={() => setAccessPage((prev) => Math.min(accessTotalPages, prev + 1))}
-          >
-            Вперёд
-          </button>
         </div>
           </div>
         )}
@@ -547,6 +443,114 @@ export default function AdminPanel({
             ))
           )}
         </div>
+          </div>
+        )}
+
+        {adminTab === "requests" && (
+          <div className="admin-card">
+            <div className="admin-header">
+              <h2>Заявки на доступ</h2>
+              <span>Подтверждение или отклонение запросов сотрудников</span>
+            </div>
+            {accessRequestStatus.error && <div className="login-error">{accessRequestStatus.error}</div>}
+            {accessRequestStatus.success && <div className="admin-success">{accessRequestStatus.success}</div>}
+            <div className="request-history-toolbar">
+              <div className="request-history-filters">
+                <select
+                  value={reviewRequestFilters.status}
+                  onChange={onReviewRequestFilterChange("status")}
+                >
+                  <option value="all">Все статусы</option>
+                  <option value="pending">Ожидает</option>
+                  <option value="approved">Одобрен</option>
+                  <option value="rejected">Отклонен</option>
+                  <option value="canceled">Отменен</option>
+                </select>
+                <select
+                  value={reviewRequestFilters.service}
+                  onChange={onReviewRequestFilterChange("service")}
+                >
+                  <option value="all">Все сервисы</option>
+                  {reviewRequestServiceOptions.map((service) => (
+                    <option key={service.id} value={service.id}>
+                      {service.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="search"
+                  placeholder="Поиск по сотруднику, сервису, комментарию"
+                  value={reviewRequestFilters.query}
+                  onChange={onReviewRequestFilterChange("query")}
+                />
+              </div>
+              <button
+                className="btn btn-mini"
+                type="button"
+                onClick={onExportAccessRequestsCsv}
+                disabled={accessRequests.length === 0}
+              >
+                CSV ({accessRequests.length}/{accessRequestsTotal})
+              </button>
+            </div>
+            <div className="admin-list">
+              {accessRequests.length === 0 ? (
+                <div className="empty-state">Заявок пока нет.</div>
+              ) : (
+                accessRequests.map((item) => (
+                  <div key={item.id} className="admin-user">
+                    <div>
+                      <strong>{item.requester?.portal_login || "Сотрудник"}</strong>
+                      <span>{item.service?.name || "Сервис"}</span>
+                      <span>{item.justification || "Без комментария"}</span>
+                      <span>
+                        Запрошено:{" "}
+                        {item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "-"}
+                      </span>
+                      {item.reviewed_at && (
+                        <span>
+                          Рассмотрено: {new Date(item.reviewed_at).toLocaleString("ru-RU")}
+                        </span>
+                      )}
+                      {item.reviewer?.portal_login && <span>Ревьюер: {item.reviewer.portal_login}</span>}
+                    </div>
+                    <div className="admin-meta">
+                      <span className={`status-pill ${item.status || "pending"}`}>
+                        {requestStatusLabel[item.status] || item.status || "pending"}
+                      </span>
+                      {item.status === "pending" && (
+                        <>
+                          <input
+                            className="request-review-input"
+                            type="text"
+                            value={reviewComments[item.id] || ""}
+                            placeholder="Комментарий (опционально)"
+                            onChange={onReviewCommentChange(item.id)}
+                            disabled={accessRequestStatus.loading}
+                          />
+                          <button
+                            className="btn btn-mini"
+                            type="button"
+                            disabled={accessRequestStatus.loading}
+                            onClick={() => onApproveAccessRequest(item.id)}
+                          >
+                            Одобрить
+                          </button>
+                          <button
+                            className="btn btn-mini danger"
+                            type="button"
+                            disabled={accessRequestStatus.loading}
+                            onClick={() => onRejectAccessRequest(item.id)}
+                          >
+                            Отклонить
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>

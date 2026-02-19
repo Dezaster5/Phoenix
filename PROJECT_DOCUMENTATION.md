@@ -4,6 +4,19 @@
 > Текущая схема: `Department`, роли `head` и `employee`, супер-админ как Django `is_superuser`, межотдельский read-only через `DepartmentShare`.
 > Если где-то в документе остались старые упоминания `admin`/`Category`, ориентируйся на актуальный код в `phoenix/vault/`.
 
+## Обновление 2026-02-19
+- Добавлен workflow заявок на доступ: `AccessRequest`.
+- Добавлено версионирование кредов: `CredentialVersion`.
+- Добавлена опциональная 2FA-авторизация через одноразовый код/магическую ссылку: `LoginChallenge`.
+- Расширен аудит: IP и User-Agent в `AuditLog`.
+- Добавлены health endpoints: `/api/health/live/` и `/api/health/ready/`.
+- Добавлены API schema/docs: `/api/schema/`, `/api/docs/`.
+- Добавлены команды:
+  - `python manage.py rotate_credential_encryption`
+  - `python manage.py cleanup_expired_security_data`
+- Добавлены скрипты backup/restore БД (`scripts/backup_db.sh`, `scripts/restore_db.sh`).
+- Добавлен CI workflow (`.github/workflows/ci.yml`).
+
 ## 1. Назначение проекта
 
 `Phoenix` - внутренний сервис хранения доступов сотрудников к рабочим системам компании.

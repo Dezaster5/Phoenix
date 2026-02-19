@@ -31,10 +31,10 @@ export default function AppHeader({
         <div className="brand">
           <div className="brand-mark">
             <span className="brand-ring" />
-            <span className="brand-letter">F</span>
+            <span className="brand-letter">A</span>
           </div>
           <div>
-            <div className="brand-title">Phoenix</div>
+            <div className="brand-title">Avatariya</div>
             <div className="brand-subtitle">vault access</div>
           </div>
         </div>

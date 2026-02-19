@@ -1,7 +1,13 @@
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
-export async function apiLogin(portalLogin) {
+export async function apiLogin(portalLogin, options = {}) {
   const payload = { portal_login: portalLogin };
+  if (options.code) {
+    payload.code = options.code;
+  }
+  if (options.magicToken) {
+    payload.magic_token = options.magicToken;
+  }
 
   const response = await fetch(`${API_BASE}/auth/login/`, {
     method: "POST",
@@ -139,5 +145,43 @@ export async function apiDeleteDepartmentShare(token, id) {
     "DELETE",
     null,
     "Ошибка удаления доступа к отделу"
+  );
+}
+
+export async function apiFetchAccessRequests(token) {
+  return apiGet("/access-requests/", token);
+}
+
+export async function apiCreateAccessRequest(token, payload) {
+  return apiWrite("/access-requests/", token, "POST", payload, "Ошибка создания запроса");
+}
+
+export async function apiApproveAccessRequest(token, id, payload = {}) {
+  return apiWrite(
+    `/access-requests/${id}/approve/`,
+    token,
+    "POST",
+    payload,
+    "Ошибка подтверждения запроса"
+  );
+}
+
+export async function apiRejectAccessRequest(token, id, payload = {}) {
+  return apiWrite(
+    `/access-requests/${id}/reject/`,
+    token,
+    "POST",
+    payload,
+    "Ошибка отклонения запроса"
+  );
+}
+
+export async function apiCancelAccessRequest(token, id, payload = {}) {
+  return apiWrite(
+    `/access-requests/${id}/cancel/`,
+    token,
+    "POST",
+    payload,
+    "Ошибка отмены запроса"
   );
 }

@@ -2,7 +2,16 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Credential, Department, DepartmentShare, Service, ServiceAccess
+from .models import (
+    AccessRequest,
+    AuditLog,
+    Credential,
+    CredentialVersion,
+    Department,
+    DepartmentShare,
+    Service,
+    ServiceAccess,
+)
 
 User = get_user_model()
 
@@ -143,6 +152,7 @@ class ServiceSerializer(serializers.ModelSerializer):
 class CredentialReadSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     service = ServiceSerializer(read_only=True)
+    latest_version = serializers.SerializerMethodField()
 
     class Meta:
         model = Credential
@@ -154,9 +164,16 @@ class CredentialReadSerializer(serializers.ModelSerializer):
             "password",
             "notes",
             "is_active",
+            "latest_version",
             "created_at",
             "updated_at",
         )
+
+    def get_latest_version(self, obj):
+        latest = obj.versions.order_by("-version").first()
+        if not latest:
+            return None
+        return latest.version
 
 
 class CredentialWriteSerializer(serializers.ModelSerializer):
@@ -282,3 +299,108 @@ class DepartmentShareSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("grantor must belong to selected department.")
 
         return attrs
+
+
+class AccessRequestReadSerializer(serializers.ModelSerializer):
+    requester = UserSerializer(read_only=True)
+    reviewer = UserSerializer(read_only=True)
+    service = ServiceSerializer(read_only=True)
+
+    class Meta:
+        model = AccessRequest
+        fields = (
+            "id",
+            "requester",
+            "service",
+            "status",
+            "justification",
+            "reviewer",
+            "review_comment",
+            "requested_at",
+            "reviewed_at",
+        )
+
+
+class AccessRequestWriteSerializer(serializers.ModelSerializer):
+    service_id = serializers.PrimaryKeyRelatedField(
+        queryset=Service.objects.filter(is_active=True),
+        source="service",
+        write_only=True,
+    )
+    service = ServiceSerializer(read_only=True)
+
+    class Meta:
+        model = AccessRequest
+        fields = (
+            "id",
+            "service",
+            "service_id",
+            "status",
+            "justification",
+            "requested_at",
+            "reviewed_at",
+        )
+        read_only_fields = ("id", "status", "requested_at", "reviewed_at")
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        service = attrs.get("service")
+        if actor is None or not actor.is_authenticated:
+            raise serializers.ValidationError("Authentication required.")
+        if service is None:
+            raise serializers.ValidationError("service_id is required.")
+        if AccessRequest.objects.filter(
+            requester=actor,
+            service=service,
+            status=AccessRequest.Status.PENDING,
+        ).exists():
+            raise serializers.ValidationError("You already have a pending request for this service.")
+        return attrs
+
+
+class AccessRequestReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AccessRequest
+        fields = ("status", "review_comment")
+
+    def validate_status(self, value):
+        if value not in (AccessRequest.Status.APPROVED, AccessRequest.Status.REJECTED):
+            raise serializers.ValidationError("Status must be approved or rejected.")
+        return value
+
+
+class CredentialVersionSerializer(serializers.ModelSerializer):
+    changed_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = CredentialVersion
+        fields = (
+            "id",
+            "version",
+            "login",
+            "password",
+            "notes",
+            "is_active",
+            "change_type",
+            "changed_by",
+            "created_at",
+        )
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    actor = UserSerializer(read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = (
+            "id",
+            "created_at",
+            "actor",
+            "action",
+            "object_type",
+            "object_id",
+            "ip_address",
+            "user_agent",
+            "metadata",
+        )

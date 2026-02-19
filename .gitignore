@@ -12,3 +12,4 @@ phoenix/keys/
 *.pyo
 *.pyd
 *.sqlite3
+backups/

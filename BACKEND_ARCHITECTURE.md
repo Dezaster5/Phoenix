@@ -4,6 +4,18 @@
 > Current production logic uses `Department`, role `head` / `employee`, super-admin as Django `is_superuser`, and `DepartmentShare` for cross-department read-only visibility.
 > If this document conflicts with code, trust current code in `phoenix/vault/models.py`, `phoenix/vault/views.py`, and `phoenix/vault/serializers.py`.
 
+## Update 2026-02-19 (Security and Ops)
+- Added `AccessRequest` workflow (employee request -> head/superuser approve/reject).
+- Added `CredentialVersion` for history and rollback visibility.
+- Added `LoginChallenge` for optional 2-step authentication (OTP / magic token).
+- Extended `AuditLog` with `ip_address` and `user_agent`.
+- Added API health endpoints: `/api/health/live/`, `/api/health/ready/`.
+- Added OpenAPI + Swagger: `/api/schema/`, `/api/docs/`.
+- Added key rotation command: `rotate_credential_encryption`.
+- Added cleanup command: `cleanup_expired_security_data`.
+- Added backup/restore scripts in `scripts/`.
+- Added CI pipeline in `.github/workflows/ci.yml`.
+
 ## 1. Purpose
 Phoenix backend is a Django + DRF service for:
 - managing employee access to company services;

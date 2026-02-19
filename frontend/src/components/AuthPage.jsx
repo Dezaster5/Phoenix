@@ -2,6 +2,9 @@ export default function AuthPage({
   status,
   portalLogin,
   onPortalLoginChange,
+  challengeRequired,
+  loginCode,
+  onLoginCodeChange,
   onLogin,
   requestEmail,
   requestSubject,
@@ -30,9 +33,20 @@ export default function AuthPage({
             placeholder="например, ivan.ivanov"
           />
         </label>
+        {challengeRequired && (
+          <label>
+            Одноразовый код
+            <input
+              type="text"
+              value={loginCode}
+              onChange={(event) => onLoginCodeChange(event.target.value)}
+              placeholder="6-значный код"
+            />
+          </label>
+        )}
         {status.error && <div className="login-error">{status.error}</div>}
         <button className="btn btn-primary" type="submit" disabled={status.loading}>
-          {status.loading ? "Проверяем..." : "Войти"}
+          {status.loading ? "Проверяем..." : challengeRequired ? "Подтвердить код" : "Войти"}
         </button>
         <div className="auth-actions">
           <a

@@ -2,6 +2,18 @@
 
 Credential vault service for company employees (Django + PostgreSQL + React).
 
+## What Is Implemented
+- Department-based RBAC (`head`, `employee`, `is_superuser`)
+- Cross-department read-only visibility (`DepartmentShare`)
+- Credential storage with encryption (`EncryptedTextField`, RSA envelope encryption + Fernet fallback)
+- Credential version history (`CredentialVersion`)
+- Access request workflow (`AccessRequest`): create / approve / reject / cancel
+- Audit logging (`AuditLog`) with IP and User-Agent
+- Optional 2-step login challenge (one-time code / magic token)
+- API schema and Swagger UI (`/api/schema/`, `/api/docs/`)
+- Health endpoints (`/api/health/live/`, `/api/health/ready/`)
+- CI pipeline for backend + frontend (`.github/workflows/ci.yml`)
+
 ## Documentation
 - Full project documentation (RU): `PROJECT_DOCUMENTATION.md`
 - Backend architecture details: `BACKEND_ARCHITECTURE.md`
@@ -9,100 +21,94 @@ Credential vault service for company employees (Django + PostgreSQL + React).
 
 ## Stack
 - Django 4.2 + DRF
+- DRF Spectacular (OpenAPI/Swagger)
 - PostgreSQL 16
 - React + Vite
 - Docker Compose
 
-## Breaking Changes (Departments & Roles)
-- Service categories replaced by departments.
-- Roles changed:
-  - `head` -> department head
-  - `employee` -> employee
-  - super-admin is Django `is_superuser=True`
-- Added cross-department read-only sharing between department heads (`department-shares`).
-
-If you had old data/schema, recreate DB for a clean start:
-```bash
-docker compose down -v
-docker compose up -d --build
-docker compose exec web python manage.py migrate
-```
-
-## 1) Local Start (Backend in Docker)
-1. Create env files from templates:
+## Local Start (Backend in Docker)
+1. Create env files:
 ```bash
 cp .env.example .env
 cp frontend/.env.example frontend/.env
 ```
 
-2. Generate RSA key pair (for asymmetric encryption of credentials):
+2. Generate RSA key pair:
 ```bash
 docker compose run --rm web python manage.py generate_rsa_keypair
 ```
 
-3. Start containers:
+3. Start services:
 ```bash
 docker compose up -d --build
 ```
 
-4. Create superuser:
+4. Run migrations:
+```bash
+docker compose exec web python manage.py migrate
+```
+
+5. Create superuser:
 ```bash
 docker compose exec web python manage.py createsuperuser
 ```
 
-5. Open backend endpoints:
-- API root: `http://localhost:8000/api/`
-- Django admin: `http://localhost:8000/admin/`
-- Company admin: `http://localhost:8000/company-admin/`
-
-## 2) Frontend Start (Local Dev)
-Frontend runs separately from Docker in this repo:
+## Frontend Dev
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Open: `http://localhost:5173/`
 
-## 3) Deploy Smoke Check
-Run and verify:
-```bash
-docker compose up -d --build
-docker compose ps
-docker compose exec db pg_isready -U phoenix -d phoenix
-docker compose exec web python manage.py check
-docker compose exec db psql -U phoenix -d phoenix -c "SELECT now();"
+## Important Endpoints
+- API root: `http://localhost:8000/api/`
+- Schema: `http://localhost:8000/api/schema/`
+- Swagger UI: `http://localhost:8000/api/docs/`
+- Health live: `http://localhost:8000/api/health/live/`
+- Health ready: `http://localhost:8000/api/health/ready/`
+- Django admin: `http://localhost:8000/admin/`
+- Company admin: `http://localhost:8000/company-admin/`
+
+## Security Settings (`.env`)
+Minimal recommended:
+```env
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=your-domain.com
+ALLOW_PASSWORDLESS_LOGIN=True
+PASSWORDLESS_ROLES=employee,head
+LOGIN_CHALLENGE_ENABLED=True
+EMAIL_NOTIFICATIONS_ENABLED=True
 ```
 
-Check encrypted credential values in DB:
+If you enable login challenge, configure SMTP env variables too (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`).
+
+## Key Rotation
+After updating encryption keys, rotate stored credential payloads:
 ```bash
-docker compose exec db psql -U phoenix -d phoenix -c "SELECT id, LEFT(password, 20) AS pass_prefix FROM vault_credential ORDER BY id DESC LIMIT 20;"
+docker compose exec web python manage.py rotate_credential_encryption
+```
+Dry run:
+```bash
+docker compose exec web python manage.py rotate_credential_encryption --dry-run
 ```
 
-Expected:
-- New records: prefix `asym:v1:`
-- Legacy records: may start with `gAAAAA...` (Fernet fallback compatibility)
-
-## 4) GitHub Push Checklist
-1. Ensure secrets are not tracked:
+## DB Backup / Restore
+Backup:
 ```bash
-git status --short
+./scripts/backup_db.sh ./backups
+```
+Restore:
+```bash
+./scripts/restore_db.sh ./backups/phoenix_YYYYMMDD_HHMMSS.dump
 ```
 
-2. Commit:
+## Test
+Local (if DB is up):
 ```bash
-git add .
-git commit -m "Prepare project for GitHub and deploy smoke check"
-```
-
-3. Push:
-```bash
-git branch -M main
-git remote add origin <YOUR_GITHUB_REPO_URL>
-git push -u origin main
+docker compose exec web python manage.py test vault.tests
 ```
 
 ## Security Notes
-- Never commit `.env` and PEM keys from `phoenix/keys/`.
-- Keep `private_key.pem` in a secure backup location.
-- For real production: set `DJANGO_DEBUG=False`, strict `DJANGO_ALLOWED_HOSTS`, HTTPS, and secure cookies.
+- Never commit `.env` or private keys.
+- Keep `phoenix/keys/private_key.pem` outside public repositories.
+- Keep backup of private key; without it `asym:v1` payloads cannot be decrypted.

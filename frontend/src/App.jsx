@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  apiCreateAccess,
+  apiApproveAccessRequest,
+  apiCancelAccessRequest,
   apiCreateCredential,
+  apiCreateAccessRequest,
   apiCreateDepartmentShare,
   apiCreateUser,
-  apiDeleteAccess,
   apiDeleteCredential,
   apiDeleteDepartmentShare,
-  apiFetchAccesses,
+  apiFetchAccessRequests,
   apiFetchCredentials,
   apiFetchDepartmentShares,
   apiFetchDepartments,
@@ -15,7 +16,7 @@ import {
   apiFetchServices,
   apiFetchUsers,
   apiLogin,
-  apiUpdateAccess,
+  apiRejectAccessRequest,
   apiUpdateCredential
 } from "./api";
 import AdminPanel from "./components/AdminPanel";
@@ -121,9 +122,17 @@ const toLatin = (value) =>
     .replace(/\.$/, "");
 
 const isHeadRole = (role) => role === "head" || role === "admin";
+const ACCESS_REQUEST_STATUS_LABEL = {
+  pending: "ожидает",
+  approved: "одобрен",
+  rejected: "отклонен",
+  canceled: "отменен"
+};
 
 export default function App() {
   const [portalLogin, setPortalLogin] = useState("");
+  const [loginCode, setLoginCode] = useState("");
+  const [challengeRequired, setChallengeRequired] = useState(false);
   const [token, setToken] = useState(() => localStorage.getItem("phoenixToken") || "");
   const [role, setRole] = useState(localStorage.getItem("phoenixRole") || "employee");
   const [isSuperuser, setIsSuperuser] = useState(
@@ -153,24 +162,37 @@ export default function App() {
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminDepartments, setAdminDepartments] = useState([]);
   const [adminServices, setAdminServices] = useState([]);
-  const [adminAccesses, setAdminAccesses] = useState([]);
+  const [requestServices, setRequestServices] = useState([]);
+  const [accessRequests, setAccessRequests] = useState([]);
   const [adminCredentials, setAdminCredentials] = useState([]);
   const [adminShares, setAdminShares] = useState([]);
   const [adminStatus, setAdminStatus] = useState({ loading: false, error: "", success: "" });
-  const [accessStatus, setAccessStatus] = useState({ loading: false, error: "", success: "" });
   const [credentialStatus, setCredentialStatus] = useState({
     loading: false,
     error: "",
     success: ""
   });
   const [shareStatus, setShareStatus] = useState({ loading: false, error: "", success: "" });
+  const [accessRequestStatus, setAccessRequestStatus] = useState({
+    loading: false,
+    error: "",
+    success: ""
+  });
+  const [ownRequestFilters, setOwnRequestFilters] = useState({
+    status: "all",
+    service: "all",
+    query: ""
+  });
+  const [reviewRequestFilters, setReviewRequestFilters] = useState({
+    status: "all",
+    service: "all",
+    query: ""
+  });
+  const [reviewComments, setReviewComments] = useState({});
   const [filters, setFilters] = useState({
-    accessUser: "all",
-    accessService: "all",
     credentialUser: "all",
     credentialService: "all"
   });
-  const [accessPage, setAccessPage] = useState(1);
   const [credentialPage, setCredentialPage] = useState(1);
   const [editCredentialId, setEditCredentialId] = useState(null);
   const [editCredentialForm, setEditCredentialForm] = useState({
@@ -185,7 +207,6 @@ export default function App() {
     role: "employee",
     department_id: ""
   });
-  const [accessForm, setAccessForm] = useState({ user_id: "", service_id: "" });
   const [credentialForm, setCredentialForm] = useState({
     user_id: "",
     service_id: "",
@@ -197,6 +218,10 @@ export default function App() {
     grantee_id: "",
     expires_at: "",
     department_id: ""
+  });
+  const [accessRequestForm, setAccessRequestForm] = useState({
+    service_id: "",
+    justification: ""
   });
   const [currentView, setCurrentView] = useState("vault");
   const [adminTab, setAdminTab] = useState("users");
@@ -217,6 +242,13 @@ export default function App() {
   }, [canManage, currentView]);
 
   useEffect(() => {
+    const allowedTabs = new Set(["users", "shares", "credentials", "requests", "directory"]);
+    if (!allowedTabs.has(adminTab)) {
+      setAdminTab("users");
+    }
+  }, [adminTab]);
+
+  useEffect(() => {
     if (!toast.visible) return;
     const timer = setTimeout(() => {
       setToast((prev) => ({ ...prev, visible: false }));
@@ -230,8 +262,13 @@ export default function App() {
     const load = async () => {
       try {
         setStatus({ loading: true, error: "", mode: "live" });
-        const [credentials, me] = await Promise.all([apiFetchCredentials(token), apiFetchMe(token)]);
+        const [credentials, me, services] = await Promise.all([
+          apiFetchCredentials(token),
+          apiFetchMe(token),
+          apiFetchServices(token)
+        ]);
         setSections(groupCredentialsByService(credentials));
+        setRequestServices(Array.isArray(services) ? services : services.results || []);
         setRole(me.role);
         setIsSuperuser(Boolean(me.is_superuser));
         setViewerLogin(me.portal_login || "");
@@ -256,23 +293,39 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) {
+      setAccessRequests([]);
+      return;
+    }
+
+    const loadAccessRequests = async () => {
+      try {
+        const response = await apiFetchAccessRequests(token);
+        setAccessRequests(Array.isArray(response) ? response : response.results || []);
+      } catch {
+        setAccessRequests([]);
+      }
+    };
+
+    loadAccessRequests();
+  }, [token]);
+
+  useEffect(() => {
     if (!token || !canManage) return;
 
     const loadUsers = async () => {
       try {
         setAdminStatus({ loading: true, error: "", success: "" });
-        const [users, departments, services, accesses, credentials, shares] = await Promise.all([
+        const [users, departments, services, credentials, shares] = await Promise.all([
           apiFetchUsers(token),
           apiFetchDepartments(token),
           apiFetchServices(token),
-          apiFetchAccesses(token),
           apiFetchCredentials(token),
           apiFetchDepartmentShares(token)
         ]);
         setAdminUsers(Array.isArray(users) ? users : users.results || []);
         setAdminDepartments(Array.isArray(departments) ? departments : departments.results || []);
         setAdminServices(Array.isArray(services) ? services : services.results || []);
-        setAdminAccesses(Array.isArray(accesses) ? accesses : accesses.results || []);
         setAdminCredentials(Array.isArray(credentials) ? credentials : credentials.results || []);
         setAdminShares(Array.isArray(shares) ? shares : shares.results || []);
         setAdminStatus({ loading: false, error: "", success: "" });
@@ -283,10 +336,6 @@ export default function App() {
 
     loadUsers();
   }, [token, canManage]);
-
-  useEffect(() => {
-    setAccessPage(1);
-  }, [filters.accessUser, filters.accessService]);
 
   useEffect(() => {
     setCredentialPage(1);
@@ -400,7 +449,23 @@ export default function App() {
     setStatus({ loading: true, error: "", mode: "live" });
 
     try {
-      const data = await apiLogin(portalLogin);
+      const data = await apiLogin(portalLogin, {
+        code: challengeRequired ? loginCode.trim() : undefined
+      });
+
+      if (data.challenge_required) {
+        setChallengeRequired(true);
+        setStatus({ loading: false, error: "Введите код из письма и нажмите Войти.", mode: "live" });
+        return;
+      }
+
+      applyAuthData(data);
+    } catch (err) {
+      setStatus({ loading: false, error: err.message, mode: "live" });
+    }
+  };
+
+  const applyAuthData = (data) => {
       localStorage.setItem("phoenixToken", data.token);
       localStorage.setItem("phoenixRole", data.role);
       localStorage.setItem("phoenixIsSuperuser", data.is_superuser ? "1" : "0");
@@ -418,10 +483,32 @@ export default function App() {
       setCurrentView("vault");
       setAdminTab("users");
       setPortalLogin("");
-    } catch (err) {
-      setStatus({ loading: false, error: err.message, mode: "demo" });
-    }
+      setLoginCode("");
+      setChallengeRequired(false);
+      setStatus({ loading: false, error: "", mode: "live" });
   };
+
+  useEffect(() => {
+    if (token) return;
+    const params = new URLSearchParams(window.location.search);
+    const magicToken = params.get("magic_token");
+    const loginFromLink = params.get("portal_login");
+    if (!magicToken || !loginFromLink) return;
+
+    const runMagicLogin = async () => {
+      setStatus({ loading: true, error: "", mode: "live" });
+      try {
+        const data = await apiLogin(loginFromLink, { magicToken });
+        applyAuthData(data);
+        const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+        window.history.replaceState({}, "", cleanUrl);
+      } catch (err) {
+        setStatus({ loading: false, error: err.message || "Ошибка входа по ссылке", mode: "live" });
+      }
+    };
+
+    runMagicLogin();
+  }, [token]);
 
   const handleLogout = () => {
     localStorage.removeItem("phoenixToken");
@@ -438,11 +525,20 @@ export default function App() {
     setViewerDepartmentId(0);
     setViewerFullName("");
     setViewerDepartment("Без отдела");
+    setRequestServices([]);
+    setAccessRequests([]);
+    setReviewComments({});
+    setAccessRequestForm({ service_id: "", justification: "" });
+    setAccessRequestStatus({ loading: false, error: "", success: "" });
+    setOwnRequestFilters({ status: "all", service: "all", query: "" });
+    setReviewRequestFilters({ status: "all", service: "all", query: "" });
     setServiceFilter("all");
     setDepartmentFilter("all");
     setOwnerFilter("all");
     setCurrentView("vault");
     setAdminTab("users");
+    setLoginCode("");
+    setChallengeRequired(false);
   };
 
   const toggleReveal = (id) => {
@@ -522,16 +618,112 @@ export default function App() {
     }
   };
 
-  const handleAccessChange = (field) => (event) => {
-    setAccessForm((prev) => ({ ...prev, [field]: event.target.value }));
-  };
-
   const handleCredentialChange = (field) => (event) => {
     setCredentialForm((prev) => ({ ...prev, [field]: event.target.value }));
   };
 
   const handleShareChange = (field) => (event) => {
     setShareForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleAccessRequestChange = (field) => (event) => {
+    setAccessRequestForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const refreshAccessRequests = async () => {
+    const response = await apiFetchAccessRequests(token);
+    setAccessRequests(Array.isArray(response) ? response : response.results || []);
+  };
+
+  const handleCreateAccessRequest = async (event) => {
+    event.preventDefault();
+    setAccessRequestStatus({ loading: true, error: "", success: "" });
+    try {
+      if (!accessRequestForm.service_id) {
+        throw new Error("Выберите сервис для запроса.");
+      }
+      const payload = {
+        service_id: Number(accessRequestForm.service_id),
+        justification: accessRequestForm.justification.trim()
+      };
+      await apiCreateAccessRequest(token, payload);
+      await refreshAccessRequests();
+      setAccessRequestForm({ service_id: "", justification: "" });
+      setAccessRequestStatus({
+        loading: false,
+        error: "",
+        success: "Запрос отправлен руководителю."
+      });
+    } catch (err) {
+      setAccessRequestStatus({
+        loading: false,
+        error: err.message || "Не удалось отправить запрос.",
+        success: ""
+      });
+    }
+  };
+
+  const handleCancelAccessRequest = async (requestId) => {
+    setAccessRequestStatus({ loading: true, error: "", success: "" });
+    try {
+      await apiCancelAccessRequest(token, requestId);
+      await refreshAccessRequests();
+      setAccessRequestStatus({ loading: false, error: "", success: "Запрос отменен." });
+    } catch (err) {
+      setAccessRequestStatus({
+        loading: false,
+        error: err.message || "Не удалось отменить запрос.",
+        success: ""
+      });
+    }
+  };
+
+  const handleReviewCommentChange = (requestId) => (event) => {
+    setReviewComments((prev) => ({ ...prev, [requestId]: event.target.value }));
+  };
+
+  const handleOwnRequestFilterChange = (field) => (event) => {
+    setOwnRequestFilters((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleReviewRequestFilterChange = (field) => (event) => {
+    setReviewRequestFilters((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleApproveWithComment = async (requestId) => {
+    setAccessRequestStatus({ loading: true, error: "", success: "" });
+    try {
+      await apiApproveAccessRequest(token, requestId, {
+        review_comment: String(reviewComments[requestId] || "").trim()
+      });
+      await refreshAccessRequests();
+      setReviewComments((prev) => ({ ...prev, [requestId]: "" }));
+      setAccessRequestStatus({ loading: false, error: "", success: "Запрос одобрен." });
+    } catch (err) {
+      setAccessRequestStatus({
+        loading: false,
+        error: err.message || "Не удалось одобрить запрос.",
+        success: ""
+      });
+    }
+  };
+
+  const handleRejectWithComment = async (requestId) => {
+    setAccessRequestStatus({ loading: true, error: "", success: "" });
+    try {
+      await apiRejectAccessRequest(token, requestId, {
+        review_comment: String(reviewComments[requestId] || "").trim()
+      });
+      await refreshAccessRequests();
+      setReviewComments((prev) => ({ ...prev, [requestId]: "" }));
+      setAccessRequestStatus({ loading: false, error: "", success: "Запрос отклонен." });
+    } catch (err) {
+      setAccessRequestStatus({
+        loading: false,
+        error: err.message || "Не удалось отклонить запрос.",
+        success: ""
+      });
+    }
   };
 
   const handleCreateShare = async (event) => {
@@ -573,52 +765,6 @@ export default function App() {
       setShareStatus({ loading: false, error: "", success: "Доступ к отделу отозван." });
     } catch (err) {
       setShareStatus({ loading: false, error: err.message, success: "" });
-    }
-  };
-
-  const handleCreateAccess = async (event) => {
-    event.preventDefault();
-    setAccessStatus({ loading: true, error: "", success: "" });
-    try {
-      if (!accessForm.user_id || !accessForm.service_id) {
-        throw new Error("Выберите сотрудника и сервис.");
-      }
-      const payload = {
-        user_id: Number(accessForm.user_id),
-        service_id: Number(accessForm.service_id),
-        is_active: true
-      };
-      await apiCreateAccess(token, payload);
-      const refreshed = await apiFetchAccesses(token);
-      setAdminAccesses(Array.isArray(refreshed) ? refreshed : refreshed.results || []);
-      setAccessForm({ user_id: "", service_id: "" });
-      setAccessStatus({ loading: false, error: "", success: "Доступ назначен" });
-    } catch (err) {
-      setAccessStatus({ loading: false, error: err.message, success: "" });
-    }
-  };
-
-  const handleToggleAccess = async (access) => {
-    setAccessStatus({ loading: true, error: "", success: "" });
-    try {
-      const updated = await apiUpdateAccess(token, access.id, { is_active: !access.is_active });
-      setAdminAccesses((prev) =>
-        prev.map((item) => (item.id === access.id ? updated : item))
-      );
-      setAccessStatus({ loading: false, error: "", success: "Доступ обновлён" });
-    } catch (err) {
-      setAccessStatus({ loading: false, error: err.message, success: "" });
-    }
-  };
-
-  const handleDeleteAccess = async (access) => {
-    setAccessStatus({ loading: true, error: "", success: "" });
-    try {
-      await apiDeleteAccess(token, access.id);
-      setAdminAccesses((prev) => prev.filter((item) => item.id !== access.id));
-      setAccessStatus({ loading: false, error: "", success: "Доступ удалён" });
-    } catch (err) {
-      setAccessStatus({ loading: false, error: err.message, success: "" });
     }
   };
 
@@ -721,13 +867,148 @@ export default function App() {
   };
 
   const totalServices = sections.reduce((sum, section) => sum + section.services.length, 0);
-  const filteredAccesses = adminAccesses.filter((access) => {
-    const byUser =
-      filters.accessUser === "all" || String(access.user?.id) === filters.accessUser;
-    const byService =
-      filters.accessService === "all" || String(access.service?.id) === filters.accessService;
-    return byUser && byService;
-  });
+  const requestableServices = useMemo(() => {
+    const source = canManage && adminServices.length > 0 ? adminServices : requestServices;
+    const unique = new Map();
+    source.forEach((service) => {
+      if (!service?.id) return;
+      unique.set(service.id, service);
+    });
+    return Array.from(unique.values()).sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || ""), "ru")
+    );
+  }, [canManage, adminServices, requestServices]);
+
+  const ownAccessRequests = useMemo(
+    () =>
+      accessRequests.filter(
+        (item) => item.requester?.portal_login === viewerLogin
+      ),
+    [accessRequests, viewerLogin]
+  );
+
+  const reviewableAccessRequests = useMemo(() => {
+    if (!canManage) return [];
+    if (isSuperuser) return accessRequests;
+    return accessRequests.filter(
+      (item) => Number(item.requester?.department?.id || 0) === viewerDepartmentId
+    );
+  }, [accessRequests, canManage, isSuperuser, viewerDepartmentId]);
+
+  const ownRequestServiceOptions = useMemo(() => {
+    const unique = new Map();
+    ownAccessRequests.forEach((item) => {
+      if (!item?.service?.id) return;
+      unique.set(item.service.id, item.service.name || `Сервис ${item.service.id}`);
+    });
+    return Array.from(unique.entries())
+      .map(([id, name]) => ({ id: String(id), name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [ownAccessRequests]);
+
+  const reviewRequestServiceOptions = useMemo(() => {
+    const unique = new Map();
+    reviewableAccessRequests.forEach((item) => {
+      if (!item?.service?.id) return;
+      unique.set(item.service.id, item.service.name || `Сервис ${item.service.id}`);
+    });
+    return Array.from(unique.entries())
+      .map(([id, name]) => ({ id: String(id), name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [reviewableAccessRequests]);
+
+  useEffect(() => {
+    if (
+      ownRequestFilters.service !== "all" &&
+      !ownRequestServiceOptions.some((service) => service.id === ownRequestFilters.service)
+    ) {
+      setOwnRequestFilters((prev) => ({ ...prev, service: "all" }));
+    }
+  }, [ownRequestFilters.service, ownRequestServiceOptions]);
+
+  useEffect(() => {
+    if (
+      reviewRequestFilters.service !== "all" &&
+      !reviewRequestServiceOptions.some((service) => service.id === reviewRequestFilters.service)
+    ) {
+      setReviewRequestFilters((prev) => ({ ...prev, service: "all" }));
+    }
+  }, [reviewRequestFilters.service, reviewRequestServiceOptions]);
+
+  const filterAccessRequests = (items, filterState) => {
+    const query = String(filterState.query || "").trim().toLowerCase();
+    return items.filter((item) => {
+      const byStatus = filterState.status === "all" || item.status === filterState.status;
+      const byService =
+        filterState.service === "all" || String(item.service?.id || "") === filterState.service;
+      const byQuery =
+        !query ||
+        [
+          item.requester?.portal_login,
+          item.reviewer?.portal_login,
+          item.service?.name,
+          item.justification,
+          item.review_comment,
+          ACCESS_REQUEST_STATUS_LABEL[item.status] || item.status
+        ]
+          .filter(Boolean)
+          .some((field) => String(field).toLowerCase().includes(query));
+      return byStatus && byService && byQuery;
+    });
+  };
+
+  const ownFilteredAccessRequests = useMemo(
+    () => filterAccessRequests(ownAccessRequests, ownRequestFilters),
+    [ownAccessRequests, ownRequestFilters]
+  );
+
+  const filteredReviewableAccessRequests = useMemo(
+    () => filterAccessRequests(reviewableAccessRequests, reviewRequestFilters),
+    [reviewableAccessRequests, reviewRequestFilters]
+  );
+
+  const exportAccessRequestsCsv = (items, prefix) => {
+    try {
+      const headers = [
+        "ID",
+        "Статус",
+        "Сервис",
+        "Запросил",
+        "Ревьюер",
+        "Обоснование",
+        "Комментарий ревьюера",
+        "Запрошено",
+        "Рассмотрено"
+      ];
+      const escapeCsv = (value) => `"${String(value ?? "").replace(/"/g, "\"\"")}"`;
+      const rows = items.map((item) => [
+        item.id,
+        ACCESS_REQUEST_STATUS_LABEL[item.status] || item.status,
+        item.service?.name || "",
+        item.requester?.portal_login || "",
+        item.reviewer?.portal_login || "",
+        item.justification || "",
+        item.review_comment || "",
+        item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "",
+        item.reviewed_at ? new Date(item.reviewed_at).toLocaleString("ru-RU") : ""
+      ]);
+      const csvContent = [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n");
+      const blob = new Blob([`\uFEFF${csvContent}`], { type: "text/csv;charset=utf-8;" });
+      const filename = `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      showToast("CSV экспорт готов");
+    } catch {
+      showToast("Не удалось выгрузить CSV", "error");
+    }
+  };
+
   const filteredCredentials = adminCredentials.filter((credential) => {
     const byUser =
       filters.credentialUser === "all" ||
@@ -737,11 +1018,8 @@ export default function App() {
       String(credential.service?.id) === filters.credentialService;
     return byUser && byService;
   });
-  const accessTotalPages = Math.max(1, Math.ceil(filteredAccesses.length / PAGE_SIZE));
   const credentialTotalPages = Math.max(1, Math.ceil(filteredCredentials.length / PAGE_SIZE));
-  const accessStart = (accessPage - 1) * PAGE_SIZE;
   const credentialStart = (credentialPage - 1) * PAGE_SIZE;
-  const pagedAccesses = filteredAccesses.slice(accessStart, accessStart + PAGE_SIZE);
   const pagedCredentials = filteredCredentials.slice(
     credentialStart,
     credentialStart + PAGE_SIZE
@@ -773,12 +1051,6 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (accessPage > accessTotalPages) {
-      setAccessPage(accessTotalPages);
-    }
-  }, [accessPage, accessTotalPages]);
-
-  useEffect(() => {
     if (credentialPage > credentialTotalPages) {
       setCredentialPage(credentialTotalPages);
     }
@@ -807,7 +1079,14 @@ export default function App() {
         <AuthPage
           status={status}
           portalLogin={portalLogin}
-          onPortalLoginChange={setPortalLogin}
+          onPortalLoginChange={(value) => {
+            setPortalLogin(value);
+            setChallengeRequired(false);
+            setLoginCode("");
+          }}
+          challengeRequired={challengeRequired}
+          loginCode={loginCode}
+          onLoginCodeChange={setLoginCode}
           onLogin={handleLogin}
           requestEmail={requestEmail}
           requestSubject={requestSubject}
@@ -835,12 +1114,24 @@ export default function App() {
           revealed={revealed}
           onToggleReveal={toggleReveal}
           onCopyField={handleCopyCredentialValue}
+          requestableServices={requestableServices}
+          accessRequestForm={accessRequestForm}
+          onAccessRequestChange={handleAccessRequestChange}
+          onCreateAccessRequest={handleCreateAccessRequest}
+          accessRequestStatus={accessRequestStatus}
+          ownAccessRequests={ownFilteredAccessRequests}
+          ownAccessRequestsTotal={ownAccessRequests.length}
+          ownRequestFilters={ownRequestFilters}
+          ownRequestServiceOptions={ownRequestServiceOptions}
+          onOwnRequestFilterChange={handleOwnRequestFilterChange}
+          onExportOwnRequestsCsv={() => exportAccessRequestsCsv(ownFilteredAccessRequests, "my_access_requests")}
+          onCancelAccessRequest={handleCancelAccessRequest}
         />
       ) : (
         <section className="page-title-bar">
           <h2>Панель руководителя</h2>
           <span className="subtitle">
-            Управление пользователями, доступами, кредами и read-only доступом к отделу
+            Управление пользователями, кредами и read-only доступом к отделу
           </span>
         </section>
       )}
@@ -864,22 +1155,11 @@ export default function App() {
           activeShares={activeShares}
           canRevokeShare={canRevokeShare}
           onDeleteShare={handleDeleteShare}
-          accessForm={accessForm}
-          onAccessChange={handleAccessChange}
           writableUsers={writableUsers}
           adminServices={adminServices}
-          accessStatus={accessStatus}
-          onCreateAccess={handleCreateAccess}
           filters={filters}
           onFilterChange={handleFilterChange}
-          pagedAccesses={pagedAccesses}
           canWriteForUser={canWriteForUser}
-          onToggleAccess={handleToggleAccess}
-          onDeleteAccess={handleDeleteAccess}
-          filteredAccesses={filteredAccesses}
-          accessPage={accessPage}
-          accessTotalPages={accessTotalPages}
-          setAccessPage={setAccessPage}
           credentialForm={credentialForm}
           onCredentialChange={handleCredentialChange}
           credentialStatus={credentialStatus}
@@ -899,6 +1179,19 @@ export default function App() {
           setCredentialPage={setCredentialPage}
           adminUsers={adminUsers}
           isHeadRole={isHeadRole}
+          accessRequests={filteredReviewableAccessRequests}
+          accessRequestsTotal={reviewableAccessRequests.length}
+          accessRequestStatus={accessRequestStatus}
+          onApproveAccessRequest={handleApproveWithComment}
+          onRejectAccessRequest={handleRejectWithComment}
+          reviewComments={reviewComments}
+          onReviewCommentChange={handleReviewCommentChange}
+          reviewRequestFilters={reviewRequestFilters}
+          reviewRequestServiceOptions={reviewRequestServiceOptions}
+          onReviewRequestFilterChange={handleReviewRequestFilterChange}
+          onExportAccessRequestsCsv={() =>
+            exportAccessRequestsCsv(filteredReviewableAccessRequests, "department_access_requests")
+          }
         />
       )}
 

@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
+    'drf_spectacular',
     'vault.apps.VaultConfig',
 ]
 
@@ -112,6 +113,23 @@ for role in os.getenv("PASSWORDLESS_ROLES", "employee,head").split(","):
         continue
     PASSWORDLESS_ROLES.append("head" if role == "admin" else role)
 
+LOGIN_CHALLENGE_ENABLED = os.getenv("LOGIN_CHALLENGE_ENABLED", "False") == "True"
+LOGIN_CHALLENGE_TTL_MINUTES = int(os.getenv("LOGIN_CHALLENGE_TTL_MINUTES", "10"))
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+
+EMAIL_NOTIFICATIONS_ENABLED = os.getenv("EMAIL_NOTIFICATIONS_ENABLED", "False") == "True"
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "False") == "True"
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "phoenix-vault@example.com")
+
 FERNET_KEY = os.getenv("FERNET_KEY")
 ASYMMETRIC_PUBLIC_KEY = os.getenv("ASYMMETRIC_PUBLIC_KEY")
 ASYMMETRIC_PRIVATE_KEY = os.getenv("ASYMMETRIC_PRIVATE_KEY")
@@ -125,6 +143,47 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {
+        "login_burst": os.getenv("THROTTLE_LOGIN_BURST", "10/min"),
+        "login_sustained": os.getenv("THROTTLE_LOGIN_SUSTAINED", "50/hour"),
+        "access_request_create": os.getenv("THROTTLE_ACCESS_REQUEST_CREATE", "20/day"),
+    },
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Phoenix Vault API",
+    "DESCRIPTION": "API для управления доступами, кредами, отделами и аудитом.",
+    "VERSION": "1.0.0",
+}
+
+if not DEBUG:
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        }
+    },
+    "loggers": {
+        "django": {"handlers": ["console"], "level": LOG_LEVEL},
+        "vault": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+    },
 }
 
 

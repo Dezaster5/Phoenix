@@ -3,7 +3,18 @@ from django.contrib.admin import AdminSite
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .forms import UserChangeForm, UserCreationForm
-from .models import AuditLog, Credential, Department, DepartmentShare, Service, ServiceAccess, User
+from .models import (
+    AccessRequest,
+    AuditLog,
+    Credential,
+    CredentialVersion,
+    Department,
+    DepartmentShare,
+    LoginChallenge,
+    Service,
+    ServiceAccess,
+    User,
+)
 
 
 class CompanyAdminSite(AdminSite):
@@ -53,10 +64,19 @@ class CompanyUserAdmin(DjangoUserAdmin):
 
 
 class CompanyAuditLogAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "actor", "action", "object_type", "object_id")
+    list_display = ("created_at", "actor", "action", "object_type", "object_id", "ip_address")
     list_filter = ("action", "object_type")
     search_fields = ("actor__portal_login", "object_id")
-    readonly_fields = ("created_at", "actor", "action", "object_type", "object_id", "metadata")
+    readonly_fields = (
+        "created_at",
+        "actor",
+        "action",
+        "object_type",
+        "object_id",
+        "ip_address",
+        "user_agent",
+        "metadata",
+    )
 
     def has_add_permission(self, request):
         return False
@@ -71,5 +91,8 @@ company_admin_site.register(Department)
 company_admin_site.register(Service)
 company_admin_site.register(ServiceAccess)
 company_admin_site.register(Credential)
+company_admin_site.register(CredentialVersion)
+company_admin_site.register(AccessRequest)
 company_admin_site.register(DepartmentShare)
+company_admin_site.register(LoginChallenge)
 company_admin_site.register(AuditLog, CompanyAuditLogAdmin)

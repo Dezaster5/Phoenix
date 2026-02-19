@@ -16,8 +16,27 @@ export default function VaultPage({
   accentClass,
   revealed,
   onToggleReveal,
-  onCopyField
+  onCopyField,
+  requestableServices,
+  accessRequestForm,
+  onAccessRequestChange,
+  onCreateAccessRequest,
+  accessRequestStatus,
+  ownAccessRequests,
+  ownAccessRequestsTotal,
+  ownRequestFilters,
+  ownRequestServiceOptions,
+  onOwnRequestFilterChange,
+  onExportOwnRequestsCsv,
+  onCancelAccessRequest
 }) {
+  const requestStatusLabel = {
+    pending: "ожидает",
+    approved: "одобрен",
+    rejected: "отклонен",
+    canceled: "отменен"
+  };
+
   return (
     <>
       <section className="toolbar">
@@ -68,6 +87,111 @@ export default function VaultPage({
                   </option>
                 ))}
               </select>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="request-strip">
+        <div className="request-panel">
+          <h3>Запрос доступа к сервису</h3>
+          <form className="request-form" onSubmit={onCreateAccessRequest}>
+            <select value={accessRequestForm.service_id} onChange={onAccessRequestChange("service_id")}>
+              <option value="">Выберите сервис</option>
+              {requestableServices.map((service) => (
+                <option key={service.id} value={service.id}>
+                  {service.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Причина запроса (необязательно)"
+              value={accessRequestForm.justification}
+              onChange={onAccessRequestChange("justification")}
+            />
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={accessRequestStatus.loading || !accessRequestForm.service_id}
+            >
+              {accessRequestStatus.loading ? "Отправляем..." : "Отправить запрос"}
+            </button>
+          </form>
+          {accessRequestStatus.error && <div className="login-error">{accessRequestStatus.error}</div>}
+          {accessRequestStatus.success && <div className="admin-success">{accessRequestStatus.success}</div>}
+        </div>
+
+        <div className="request-panel">
+          <h3>Мои запросы</h3>
+          <div className="request-history-toolbar">
+            <div className="request-history-filters">
+              <select value={ownRequestFilters.status} onChange={onOwnRequestFilterChange("status")}>
+                <option value="all">Все статусы</option>
+                <option value="pending">Ожидает</option>
+                <option value="approved">Одобрен</option>
+                <option value="rejected">Отклонен</option>
+                <option value="canceled">Отменен</option>
+              </select>
+              <select value={ownRequestFilters.service} onChange={onOwnRequestFilterChange("service")}>
+                <option value="all">Все сервисы</option>
+                {ownRequestServiceOptions.map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="search"
+                placeholder="Поиск по сервису или комментарию"
+                value={ownRequestFilters.query}
+                onChange={onOwnRequestFilterChange("query")}
+              />
+            </div>
+            <button
+              className="btn btn-mini"
+              type="button"
+              onClick={onExportOwnRequestsCsv}
+              disabled={ownAccessRequests.length === 0}
+            >
+              CSV ({ownAccessRequests.length}/{ownAccessRequestsTotal})
+            </button>
+          </div>
+          <div className="request-list">
+            {ownAccessRequests.length === 0 ? (
+              <div className="request-item-empty">Заявок пока нет.</div>
+            ) : (
+              ownAccessRequests.map((item) => (
+                <div key={item.id} className="request-item">
+                  <div>
+                    <strong>{item.service?.name || "Сервис"}</strong>
+                    <span>{item.justification || "Без комментария"}</span>
+                    <span>
+                      Запрошено: {item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "-"}
+                    </span>
+                    {item.reviewed_at && (
+                      <span>
+                        Рассмотрено: {new Date(item.reviewed_at).toLocaleString("ru-RU")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="request-item-actions">
+                    <span className={`status-pill ${item.status || "pending"}`}>
+                      {requestStatusLabel[item.status] || item.status}
+                    </span>
+                    {item.status === "pending" && (
+                      <button
+                        className="btn btn-mini danger"
+                        type="button"
+                        onClick={() => onCancelAccessRequest(item.id)}
+                        disabled={accessRequestStatus.loading}
+                      >
+                        Отменить
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>

@@ -3,7 +3,6 @@ services:
     build: .
     command: >
       bash -c "python manage.py wait_for_db &&
-      python manage.py makemigrations --noinput &&
       python manage.py migrate &&
       python manage.py runserver 0.0.0.0:8000"
     volumes:
@@ -13,7 +12,13 @@ services:
     env_file:
       - .env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/live/').read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   db:
     image: postgres:16
@@ -25,6 +30,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-phoenix} -d ${POSTGRES_DB:-phoenix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   adminer:
     image: adminer

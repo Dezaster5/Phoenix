@@ -15,7 +15,7 @@ def create_auth_token(sender, instance=None, created=False, **kwargs):
 def ensure_service_access(sender, instance=None, created=False, **kwargs):
     if instance is None:
         return
-    ServiceAccess.objects.get_or_create(
+    ServiceAccess.objects.update_or_create(
         user=instance.user,
         service=instance.service,
         defaults={"is_active": instance.is_active},

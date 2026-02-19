@@ -68,7 +68,50 @@ erDiagram
         varchar action
         varchar object_type
         varchar object_id
+        inet ip_address
+        varchar user_agent
         json metadata
+        datetime created_at
+    }
+
+    ACCESS_REQUEST {
+        bigint id PK
+        bigint requester_id FK
+        bigint service_id FK
+        varchar status
+        text justification
+        bigint reviewer_id FK
+        text review_comment
+        datetime requested_at
+        datetime reviewed_at
+    }
+
+    CREDENTIAL_VERSION {
+        bigint id PK
+        bigint credential_id FK
+        int version
+        varchar login
+        text password_encrypted
+        text notes
+        bool is_active
+        varchar change_type
+        bigint changed_by_id FK
+        datetime created_at
+    }
+
+    LOGIN_CHALLENGE {
+        bigint id PK
+        bigint user_id FK
+        varchar channel
+        varchar code_digest
+        varchar magic_token_digest
+        varchar salt
+        datetime expires_at
+        datetime consumed_at
+        int attempts
+        int max_attempts
+        inet ip_address
+        varchar user_agent
         datetime created_at
     }
 
@@ -91,11 +134,20 @@ erDiagram
     USER ||--o{ DEPARTMENT_SHARE : grantee
     DEPARTMENT ||--o{ DEPARTMENT_SHARE : shared
 
+    USER ||--o{ ACCESS_REQUEST : requester
+    USER o|--o{ ACCESS_REQUEST : reviewer
+    SERVICE ||--o{ ACCESS_REQUEST : target
+
+    CREDENTIAL ||--o{ CREDENTIAL_VERSION : versions
+    USER o|--o{ CREDENTIAL_VERSION : changed_by
+
     USER o|--o{ AUDIT_LOG : acts_as_actor
+    USER ||--o{ LOGIN_CHALLENGE : login_challenges
     USER ||--|| AUTH_TOKEN : authenticates
 ```
 
 Notes:
 - `SERVICE_ACCESS` and `CREDENTIAL` enforce unique `(user_id, service_id)`.
 - `DEPARTMENT_SHARE` enforces unique `(department_id, grantor_id, grantee_id)`.
+- `CREDENTIAL_VERSION` enforces unique `(credential_id, version)`.
 - `CREDENTIAL.password_encrypted` stored via `EncryptedTextField` (asymmetric envelope encryption if configured).

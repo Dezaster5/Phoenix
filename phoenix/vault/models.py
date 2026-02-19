@@ -175,6 +175,8 @@ class AuditLog(models.Model):
     action = models.CharField(max_length=16, choices=Action.choices)
     object_type = models.CharField(max_length=64)
     object_id = models.CharField(max_length=64)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True, default="")
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -204,3 +206,101 @@ class DepartmentShare(models.Model):
 
     def __str__(self):
         return f"{self.grantor.portal_login} -> {self.grantee.portal_login} ({self.department.name})"
+
+
+class LoginChallenge(models.Model):
+    class Channel(models.TextChoices):
+        EMAIL = "email", "Email"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="login_challenges"
+    )
+    channel = models.CharField(max_length=16, choices=Channel.choices, default=Channel.EMAIL)
+    code_digest = models.CharField(max_length=64)
+    magic_token_digest = models.CharField(max_length=64)
+    salt = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    max_attempts = models.PositiveSmallIntegerField(default=5)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Login challenge for {self.user.portal_login}"
+
+    @property
+    def is_active(self):
+        return (
+            self.consumed_at is None
+            and self.attempts < self.max_attempts
+            and self.expires_at > timezone.now()
+        )
+
+
+class AccessRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        CANCELED = "canceled", "Canceled"
+
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="access_requests"
+    )
+    service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="access_requests")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    justification = models.TextField(blank=True)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_access_requests",
+    )
+    review_comment = models.TextField(blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+
+    def __str__(self):
+        return f"{self.requester.portal_login} -> {self.service.name} ({self.status})"
+
+
+class CredentialVersion(models.Model):
+    class ChangeType(models.TextChoices):
+        CREATE = "create", "Create"
+        UPDATE = "update", "Update"
+        DISABLE = "disable", "Disable"
+        ROTATE = "rotate", "Rotate"
+
+    credential = models.ForeignKey(
+        Credential, on_delete=models.CASCADE, related_name="versions"
+    )
+    version = models.PositiveIntegerField()
+    login = models.CharField(max_length=255)
+    password = EncryptedTextField()
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    change_type = models.CharField(max_length=16, choices=ChangeType.choices)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="credential_versions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = ("credential", "version")
+
+    def __str__(self):
+        return f"{self.credential_id} v{self.version}"
