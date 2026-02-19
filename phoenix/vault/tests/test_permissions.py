@@ -103,6 +103,25 @@ class PermissionMatrixTests(TestCase):
         )
         self.assertEqual(patch_response.status_code, 403)
 
+    def test_department_head_with_share_can_view_shared_department_requests(self):
+        AccessRequest.objects.create(
+            requester=self.emp_it,
+            service=self.service_it,
+            status=AccessRequest.Status.PENDING,
+        )
+        AccessRequest.objects.create(
+            requester=self.emp_mkt,
+            service=self.service_mkt,
+            status=AccessRequest.Status.PENDING,
+        )
+        self._auth(self.head_mkt)
+        response = self.client.get("/api/access-requests/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        requester_logins = {item["requester"]["portal_login"] for item in payload}
+        self.assertIn(self.emp_it.portal_login, requester_logins)
+        self.assertIn(self.emp_mkt.portal_login, requester_logins)
+
     def test_superuser_can_update_any_credential(self):
         self._auth(self.superuser)
         patch_response = self.client.patch(
@@ -127,6 +146,22 @@ class PermissionMatrixTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_employee_sees_all_active_services_for_request_flow(self):
+        inactive = Service.objects.create(
+            name="Old Tool",
+            url="https://old.local",
+            department=self.dep_mkt,
+            is_active=False,
+        )
+        self._auth(self.emp_it)
+        response = self.client.get("/api/services/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        service_names = {item["name"] for item in payload}
+        self.assertIn(self.service_it.name, service_names)
+        self.assertIn(self.service_mkt.name, service_names)
+        self.assertNotIn(inactive.name, service_names)
 
     def test_audit_logs_visible_for_superuser(self):
         self._auth(self.superuser)

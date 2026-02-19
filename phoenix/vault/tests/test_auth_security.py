@@ -49,6 +49,28 @@ class LoginChallengeTests(TestCase):
         )
         self.assertEqual(reuse.status_code, 400)
 
+    def test_login_can_be_verified_by_magic_token(self):
+        first = self.client.post("/api/auth/login/", {"portal_login": self.user.portal_login}, format="json")
+        self.assertEqual(first.status_code, 202)
+        payload = first.json()
+        debug_magic_token = payload.get("debug_magic_token")
+        self.assertTrue(debug_magic_token)
+
+        second = self.client.post(
+            "/api/auth/login/",
+            {"portal_login": self.user.portal_login, "magic_token": debug_magic_token},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 200)
+        self.assertIn("token", second.json())
+
+        reuse = self.client.post(
+            "/api/auth/login/",
+            {"portal_login": self.user.portal_login, "magic_token": debug_magic_token},
+            format="json",
+        )
+        self.assertEqual(reuse.status_code, 400)
+
     def test_login_event_written_to_audit(self):
         first = self.client.post("/api/auth/login/", {"portal_login": self.user.portal_login}, format="json")
         debug_code = first.json()["debug_code"]
