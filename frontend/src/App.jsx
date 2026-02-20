@@ -6,6 +6,7 @@ import {
   apiCreateAccessRequest,
   apiCreateDepartmentShare,
   apiCreateUser,
+  apiDeleteUser,
   apiDeleteCredential,
   apiDeleteDepartmentShare,
   apiFetchAccessRequests,
@@ -17,6 +18,7 @@ import {
   apiFetchUsers,
   apiLogin,
   apiRejectAccessRequest,
+  apiUpdateUser,
   apiUpdateCredential
 } from "./api";
 import AdminPanel from "./components/AdminPanel";
@@ -24,12 +26,6 @@ import AppHeader from "./components/AppHeader";
 import AuthPage from "./components/AuthPage";
 import VaultPage from "./components/VaultPage";
 import { demoSections } from "./data/demo";
-
-const accentClass = {
-  sunset: "accent-sunset",
-  sky: "accent-sky",
-  mint: "accent-mint"
-};
 
 const groupCredentialsByService = (credentials) => {
   const grouped = new Map();
@@ -153,9 +149,6 @@ export default function App() {
   const [sections, setSections] = useState(demoSections);
   const [search, setSearch] = useState("");
   const [serviceFilter, setServiceFilter] = useState("all");
-  const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [ownerFilter, setOwnerFilter] = useState("all");
-  const [revealed, setRevealed] = useState({});
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
   const [status, setStatus] = useState({ loading: false, error: "", mode: "demo" });
@@ -344,14 +337,12 @@ export default function App() {
   const filteredSections = useMemo(() => {
     const query = search.trim().toLowerCase();
     const serviceFilterValue = serviceFilter;
-    const departmentFilterValue = departmentFilter;
-    const ownerFilterValue = ownerFilter;
 
     const sectionScoped = sections.filter(
       (section) => serviceFilterValue === "all" || String(section.id) === serviceFilterValue
     );
 
-    if (!query && departmentFilterValue === "all" && ownerFilterValue === "all") {
+    if (!query) {
       return sectionScoped;
     }
 
@@ -359,10 +350,6 @@ export default function App() {
       .map((section) => ({
         ...section,
         services: section.services.filter((service) => {
-          const byDepartment =
-            departmentFilterValue === "all" ||
-            (service.owner_department || "Без отдела") === departmentFilterValue;
-          const byOwner = ownerFilterValue === "all" || service.owner_login === ownerFilterValue;
           const byQuery =
             !query ||
             [
@@ -377,11 +364,11 @@ export default function App() {
             ]
               .filter(Boolean)
               .some((field) => String(field).toLowerCase().includes(query));
-          return byDepartment && byOwner && byQuery;
+          return byQuery;
         })
       }))
       .filter((section) => section.services.length > 0);
-  }, [sections, search, serviceFilter, departmentFilter, ownerFilter]);
+  }, [sections, search, serviceFilter]);
 
   const serviceOptions = useMemo(
     () =>
@@ -392,57 +379,11 @@ export default function App() {
     [sections]
   );
 
-  const departmentOptions = useMemo(() => {
-    const unique = new Set();
-    sections.forEach((section) => {
-      section.services.forEach((service) => {
-        unique.add(service.owner_department || "Без отдела");
-      });
-    });
-    return Array.from(unique).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [sections]);
-
-  const ownerOptions = useMemo(() => {
-    const unique = new Map();
-    sections.forEach((section) => {
-      section.services.forEach((service) => {
-        const login = service.owner_login;
-        if (!login) return;
-        if (!unique.has(login)) {
-          unique.set(login, service.owner_name ? `${login} (${service.owner_name})` : login);
-        }
-      });
-    });
-    return Array.from(unique.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((a, b) => a.label.localeCompare(b.label, "ru"));
-  }, [sections]);
-
   useEffect(() => {
     if (serviceFilter !== "all" && !serviceOptions.some((option) => option.id === serviceFilter)) {
       setServiceFilter("all");
     }
   }, [serviceFilter, serviceOptions]);
-
-  useEffect(() => {
-    if (departmentFilter !== "all" && !departmentOptions.includes(departmentFilter)) {
-      setDepartmentFilter("all");
-    }
-  }, [departmentFilter, departmentOptions]);
-
-  useEffect(() => {
-    if (ownerFilter !== "all" && !ownerOptions.some((option) => option.value === ownerFilter)) {
-      setOwnerFilter("all");
-    }
-  }, [ownerFilter, ownerOptions]);
-
-  useEffect(() => {
-    if (!token) {
-      setServiceFilter("all");
-      setDepartmentFilter("all");
-      setOwnerFilter("all");
-    }
-  }, [token]);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -533,16 +474,10 @@ export default function App() {
     setOwnRequestFilters({ status: "all", service: "all", query: "" });
     setReviewRequestFilters({ status: "all", service: "all", query: "" });
     setServiceFilter("all");
-    setDepartmentFilter("all");
-    setOwnerFilter("all");
     setCurrentView("vault");
     setAdminTab("users");
     setLoginCode("");
     setChallengeRequired(false);
-  };
-
-  const toggleReveal = (id) => {
-    setRevealed((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   const handleCopyTemplate = async () => {
@@ -615,6 +550,68 @@ export default function App() {
       setAdminStatus({ loading: false, error: "", success: "Пользователь создан" });
     } catch (err) {
       setAdminStatus({ loading: false, error: err.message, success: "" });
+    }
+  };
+
+  const handleEditUser = async (user) => {
+    const nextFullName = window.prompt("ФИО", user.full_name || "");
+    if (nextFullName === null) return;
+    const nextEmail = window.prompt("Почта", user.email || "");
+    if (nextEmail === null) return;
+
+    setAdminStatus({ loading: true, error: "", success: "" });
+    try {
+      const updated = await apiUpdateUser(token, user.id, {
+        full_name: String(nextFullName).trim(),
+        email: String(nextEmail).trim()
+      });
+      setAdminUsers((prev) => prev.map((item) => (item.id === user.id ? updated : item)));
+      setAdminStatus({ loading: false, error: "", success: "Пользователь обновлен" });
+    } catch (err) {
+      setAdminStatus({ loading: false, error: err.message, success: "" });
+    }
+  };
+
+  const handleDeactivateUser = async (user) => {
+    if (!window.confirm(`Деактивировать пользователя ${user.portal_login}?`)) {
+      return;
+    }
+    setAdminStatus({ loading: true, error: "", success: "" });
+    try {
+      await apiDeleteUser(token, user.id);
+      setAdminUsers((prev) =>
+        prev.map((item) => (item.id === user.id ? { ...item, is_active: false } : item))
+      );
+      setAdminStatus({ loading: false, error: "", success: "Пользователь деактивирован" });
+    } catch (err) {
+      setAdminStatus({ loading: false, error: err.message, success: "" });
+    }
+  };
+
+  const handleResetUserAccess = async (user) => {
+    if (!window.confirm(`Сбросить все активные доступы для ${user.portal_login}?`)) {
+      return;
+    }
+    setCredentialStatus({ loading: true, error: "", success: "" });
+    try {
+      const targets = adminCredentials.filter(
+        (credential) => credential.user?.id === user.id && credential.is_active
+      );
+      if (targets.length === 0) {
+        setCredentialStatus({ loading: false, error: "", success: "У пользователя нет активных доступов" });
+        return;
+      }
+      const updatedMap = new Map();
+      for (const credential of targets) {
+        const updated = await apiUpdateCredential(token, credential.id, { is_active: false });
+        updatedMap.set(updated.id, updated);
+      }
+      setAdminCredentials((prev) =>
+        prev.map((item) => (updatedMap.has(item.id) ? updatedMap.get(item.id) : item))
+      );
+      setCredentialStatus({ loading: false, error: "", success: "Доступы пользователя сброшены" });
+    } catch (err) {
+      setCredentialStatus({ loading: false, error: err.message, success: "" });
     }
   };
 
@@ -750,7 +747,7 @@ export default function App() {
       setShareStatus({
         loading: false,
         error: "",
-        success: "Read-only доступ к отделу выдан."
+        success: "Доступ только для просмотра выдан."
       });
     } catch (err) {
       setShareStatus({ loading: false, error: err.message, success: "" });
@@ -758,6 +755,9 @@ export default function App() {
   };
 
   const handleDeleteShare = async (share) => {
+    if (!window.confirm("Отозвать доступ к отделу?")) {
+      return;
+    }
     setShareStatus({ loading: true, error: "", success: "" });
     try {
       await apiDeleteDepartmentShare(token, share.id);
@@ -797,6 +797,9 @@ export default function App() {
   };
 
   const handleDeleteCredential = async (credential) => {
+    if (!window.confirm("Удалить учетные данные?")) {
+      return;
+    }
     setCredentialStatus({ loading: true, error: "", success: "" });
     try {
       await apiDeleteCredential(token, credential.id);
@@ -866,7 +869,6 @@ export default function App() {
     }
   };
 
-  const totalServices = sections.reduce((sum, section) => sum + section.services.length, 0);
   const requestableServices = useMemo(() => {
     const source = canManage && adminServices.length > 0 ? adminServices : requestServices;
     const unique = new Map();
@@ -1096,23 +1098,13 @@ export default function App() {
         />
       ) : currentView === "vault" ? (
         <VaultPage
-          totalServices={totalServices}
           serviceGroupsCount={sections.length}
           search={search}
           onSearchChange={setSearch}
           serviceFilter={serviceFilter}
           onServiceFilterChange={setServiceFilter}
           serviceOptions={serviceOptions}
-          departmentOptions={departmentOptions}
-          departmentFilter={departmentFilter}
-          onDepartmentFilterChange={setDepartmentFilter}
-          ownerOptions={ownerOptions}
-          ownerFilter={ownerFilter}
-          onOwnerFilterChange={setOwnerFilter}
           filteredSections={filteredSections}
-          accentClass={accentClass}
-          revealed={revealed}
-          onToggleReveal={toggleReveal}
           onCopyField={handleCopyCredentialValue}
           requestableServices={requestableServices}
           accessRequestForm={accessRequestForm}
@@ -1127,14 +1119,7 @@ export default function App() {
           onExportOwnRequestsCsv={() => exportAccessRequestsCsv(ownFilteredAccessRequests, "my_access_requests")}
           onCancelAccessRequest={handleCancelAccessRequest}
         />
-      ) : (
-        <section className="page-title-bar">
-          <h2>Панель руководителя</h2>
-          <span className="subtitle">
-            Управление пользователями, кредами и read-only доступом к отделу
-          </span>
-        </section>
-      )}
+      ) : null}
 
       {isAuthenticated && canManage && currentView === "admin" && (
         <AdminPanel
@@ -1147,6 +1132,9 @@ export default function App() {
           adminDepartments={adminDepartments}
           adminStatus={adminStatus}
           onCreateUser={handleCreateUser}
+          onEditUser={handleEditUser}
+          onDeactivateUser={handleDeactivateUser}
+          onResetUserAccess={handleResetUserAccess}
           shareForm={shareForm}
           onShareChange={handleShareChange}
           headCandidates={headCandidates}
@@ -1164,7 +1152,6 @@ export default function App() {
           onCredentialChange={handleCredentialChange}
           credentialStatus={credentialStatus}
           onCreateCredential={handleCreateCredential}
-          filteredCredentials={filteredCredentials}
           pagedCredentials={pagedCredentials}
           editCredentialId={editCredentialId}
           editCredentialForm={editCredentialForm}
@@ -1192,6 +1179,7 @@ export default function App() {
           onExportAccessRequestsCsv={() =>
             exportAccessRequestsCsv(filteredReviewableAccessRequests, "department_access_requests")
           }
+          adminCredentials={adminCredentials}
         />
       )}
 
@@ -1205,14 +1193,6 @@ export default function App() {
         </div>
       )}
 
-      {isAuthenticated && (
-        <footer className="footer">
-          <div>
-            <strong>Phoenix Vault</strong>
-            <span>Внутренний сервис доступа Avatariya</span>
-          </div>
-        </footer>
-      )}
     </div>
   );
 }

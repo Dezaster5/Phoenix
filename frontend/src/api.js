@@ -78,6 +78,14 @@ export async function apiCreateUser(token, payload) {
   return apiWrite("/users/", token, "POST", payload, "Ошибка создания пользователя");
 }
 
+export async function apiUpdateUser(token, id, payload) {
+  return apiWrite(`/users/${id}/`, token, "PATCH", payload, "Ошибка обновления пользователя");
+}
+
+export async function apiDeleteUser(token, id) {
+  return apiWrite(`/users/${id}/`, token, "DELETE", null, "Ошибка деактивации пользователя");
+}
+
 export async function apiFetchServices(token) {
   return apiGet("/services/", token);
 }

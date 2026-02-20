@@ -1,21 +1,15 @@
+import { useEffect, useMemo, useState } from "react";
+
+const PASSWORD_VISIBLE_MS = 10000;
+
 export default function VaultPage({
-  totalServices,
   serviceGroupsCount,
   search,
   onSearchChange,
   serviceFilter,
   onServiceFilterChange,
   serviceOptions,
-  departmentOptions,
-  departmentFilter,
-  onDepartmentFilterChange,
-  ownerOptions,
-  ownerFilter,
-  onOwnerFilterChange,
   filteredSections,
-  accentClass,
-  revealed,
-  onToggleReveal,
   onCopyField,
   requestableServices,
   accessRequestForm,
@@ -30,6 +24,26 @@ export default function VaultPage({
   onExportOwnRequestsCsv,
   onCancelAccessRequest
 }) {
+  const [nowTs, setNowTs] = useState(Date.now());
+  const [passwordVisibleUntil, setPasswordVisibleUntil] = useState({});
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const rows = useMemo(
+    () =>
+      filteredSections.flatMap((section) =>
+        section.services.map((service) => ({
+          ...service,
+          sectionName: section.name,
+          serviceUrl: service.url || section.url || ""
+        }))
+      ),
+    [filteredSections]
+  );
+
   const requestStatusLabel = {
     pending: "ожидает",
     approved: "одобрен",
@@ -37,242 +51,243 @@ export default function VaultPage({
     canceled: "отменен"
   };
 
+  const showPasswordForTenSeconds = (rowId) => {
+    setPasswordVisibleUntil((prev) => ({ ...prev, [rowId]: Date.now() + PASSWORD_VISIBLE_MS }));
+  };
+
+  const isPasswordVisible = (rowId) => Number(passwordVisibleUntil[rowId] || 0) > nowTs;
+  const remainingSeconds = (rowId) =>
+    Math.max(0, Math.ceil((Number(passwordVisibleUntil[rowId] || 0) - nowTs) / 1000));
+
+  const handleCopyPassword = (row) => {
+    if (!isPasswordVisible(row.id)) {
+      window.alert("Сначала нажмите «Показать на 10 сек».");
+      return;
+    }
+    onCopyField?.(row.password, "Пароль");
+  };
+
   return (
-    <>
-      <section className="toolbar">
-        <div className="toolbar-left">
-          <h2>Мои сервисы</h2>
-          <span className="subtitle">
-            Учёток: {totalServices} | Сервисов: {serviceGroupsCount}
-          </span>
-        </div>
-        <div className="toolbar-right">
-          <div className="search">
-            <input
-              type="search"
-              placeholder="Поиск по сервису, логину или ссылке"
-              value={search}
-              onChange={(event) => onSearchChange(event.target.value)}
-            />
-            <span className="search-icon">⌕</span>
+    <section className="workspace">
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Vault</h2>
+            <p>Мои доступы: сервисов {serviceGroupsCount}, учетных записей {rows.length}</p>
           </div>
-          <div className="view-filters">
-            <select value={serviceFilter} onChange={(event) => onServiceFilterChange(event.target.value)}>
-              <option value="all">Все сервисы</option>
-              {serviceOptions.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name}
-                </option>
-              ))}
-            </select>
-            {departmentOptions.length > 1 && (
-              <select
-                value={departmentFilter}
-                onChange={(event) => onDepartmentFilterChange(event.target.value)}
-              >
-                <option value="all">Все отделы</option>
-                {departmentOptions.map((department) => (
-                  <option key={department} value={department}>
-                    {department}
-                  </option>
-                ))}
-              </select>
-            )}
-            {ownerOptions.length > 1 && (
-              <select value={ownerFilter} onChange={(event) => onOwnerFilterChange(event.target.value)}>
-                <option value="all">Все сотрудники</option>
-                {ownerOptions.map((owner) => (
-                  <option key={owner.value} value={owner.value}>
-                    {owner.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section className="request-strip">
-        <div className="request-panel">
-          <h3>Запрос доступа к сервису</h3>
-          <form className="request-form" onSubmit={onCreateAccessRequest}>
-            <select value={accessRequestForm.service_id} onChange={onAccessRequestChange("service_id")}>
-              <option value="">Выберите сервис</option>
-              {requestableServices.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              placeholder="Причина запроса (необязательно)"
-              value={accessRequestForm.justification}
-              onChange={onAccessRequestChange("justification")}
-            />
-            <button
-              className="btn btn-primary"
-              type="submit"
-              disabled={accessRequestStatus.loading || !accessRequestForm.service_id}
-            >
-              {accessRequestStatus.loading ? "Отправляем..." : "Отправить запрос"}
-            </button>
-          </form>
-          {accessRequestStatus.error && <div className="login-error">{accessRequestStatus.error}</div>}
-          {accessRequestStatus.success && <div className="admin-success">{accessRequestStatus.success}</div>}
         </div>
 
-        <div className="request-panel">
-          <h3>Мои запросы</h3>
-          <div className="request-history-toolbar">
-            <div className="request-history-filters">
-              <select value={ownRequestFilters.status} onChange={onOwnRequestFilterChange("status")}>
-                <option value="all">Все статусы</option>
-                <option value="pending">Ожидает</option>
-                <option value="approved">Одобрен</option>
-                <option value="rejected">Отклонен</option>
-                <option value="canceled">Отменен</option>
-              </select>
-              <select value={ownRequestFilters.service} onChange={onOwnRequestFilterChange("service")}>
-                <option value="all">Все сервисы</option>
-                {ownRequestServiceOptions.map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {service.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="search"
-                placeholder="Поиск по сервису или комментарию"
-                value={ownRequestFilters.query}
-                onChange={onOwnRequestFilterChange("query")}
-              />
-            </div>
-            <button
-              className="btn btn-mini"
-              type="button"
-              onClick={onExportOwnRequestsCsv}
-              disabled={ownAccessRequests.length === 0}
-            >
-              CSV ({ownAccessRequests.length}/{ownAccessRequestsTotal})
-            </button>
-          </div>
-          <div className="request-list">
-            {ownAccessRequests.length === 0 ? (
-              <div className="request-item-empty">Заявок пока нет.</div>
-            ) : (
-              ownAccessRequests.map((item) => (
-                <div key={item.id} className="request-item">
-                  <div>
-                    <strong>{item.service?.name || "Сервис"}</strong>
-                    <span>{item.justification || "Без комментария"}</span>
-                    <span>
-                      Запрошено: {item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "-"}
-                    </span>
-                    {item.reviewed_at && (
-                      <span>
-                        Рассмотрено: {new Date(item.reviewed_at).toLocaleString("ru-RU")}
-                      </span>
-                    )}
-                  </div>
-                  <div className="request-item-actions">
-                    <span className={`status-pill ${item.status || "pending"}`}>
-                      {requestStatusLabel[item.status] || item.status}
-                    </span>
-                    {item.status === "pending" && (
-                      <button
-                        className="btn btn-mini danger"
-                        type="button"
-                        onClick={() => onCancelAccessRequest(item.id)}
-                        disabled={accessRequestStatus.loading}
-                      >
-                        Отменить
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+        <div className="toolbar-row">
+          <input
+            type="search"
+            placeholder="Поиск по сервису, логину или примечанию"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+          <select value={serviceFilter} onChange={(event) => onServiceFilterChange(event.target.value)}>
+            <option value="all">Все сервисы</option>
+            {serviceOptions.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name}
+              </option>
+            ))}
+          </select>
         </div>
-      </section>
 
-      <main className="sections">
-        {filteredSections.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="empty-state">
-            <h3>Сервисы ещё не назначены</h3>
-            <p>Свяжитесь с руководителем отдела, чтобы получить доступ.</p>
+            Нет доступов. Запросите сервис у руководителя.
           </div>
         ) : (
-          filteredSections.map((section) => (
-            <div key={section.id} className={`section ${accentClass[section.accent] || "accent-sky"}`}>
-              <div className="section-header">
-                <div>
-                  <h3>{section.name}</h3>
-                  <p>{section.tagline}</p>
-                </div>
-                <div className="section-count">{section.services.length} учёток</div>
-              </div>
-              <div className="service-grid">
-                {section.services.map((service) => (
-                  <article key={service.id} className="service-card">
-                    <div className="service-head">
-                      <div className="service-icon">
-                        {(service.owner_login || service.name).slice(0, 1).toUpperCase()}
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Сервис</th>
+                  <th>Пользователь</th>
+                  <th>Логин</th>
+                  <th>Пароль</th>
+                  <th>Примечание</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <div>{row.sectionName}</div>
+                      {row.serviceUrl && (
+                        <a href={row.serviceUrl} target="_blank" rel="noreferrer">
+                          Открыть
+                        </a>
+                      )}
+                    </td>
+                    <td>{row.owner_name || row.owner_login || "Сотрудник"}</td>
+                    <td>{row.login}</td>
+                    <td>
+                      {isPasswordVisible(row.id) ? row.password : "••••••••"}
+                    </td>
+                    <td>{row.notes || "—"}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => onCopyField?.(row.login, "Логин")}>
+                          Копировать логин
+                        </button>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => showPasswordForTenSeconds(row.id)}>
+                          Показать на 10 сек
+                        </button>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => handleCopyPassword(row)}>
+                          Копировать пароль
+                        </button>
+                        {isPasswordVisible(row.id) && (
+                          <span className="hint">Скрытие через {remainingSeconds(row.id)}с</span>
+                        )}
                       </div>
-                      <div>
-                        <div className="service-name">
-                          {service.owner_name || service.owner_login || "Сотрудник"}
-                        </div>
-                        <div className="service-url">
-                          {service.owner_login || "Без логина"}
-                          {" | "}
-                          Отдел: {service.owner_department || "Без отдела"}
-                        </div>
-                      </div>
-                      <a className="btn btn-mini" href={service.url} target="_blank" rel="noreferrer">
-                        Открыть
-                      </a>
-                    </div>
-                    <div className="service-body">
-                      <div className="cred">
-                        <span>Логин</span>
-                        <strong>{service.login}</strong>
-                        <div className="cred-actions">
-                          <button
-                            className="reveal"
-                            type="button"
-                            onClick={() => onCopyField?.(service.login, "Логин")}
-                          >
-                            Копировать
-                          </button>
-                        </div>
-                      </div>
-                      <div className="cred">
-                        <span>Пароль</span>
-                        <strong>{revealed[service.id] ? service.password : "••••••••"}</strong>
-                        <div className="cred-actions">
-                          <button className="reveal" type="button" onClick={() => onToggleReveal(service.id)}>
-                            {revealed[service.id] ? "Скрыть" : "Показать"}
-                          </button>
-                          <button
-                            className="reveal"
-                            type="button"
-                            onClick={() => onCopyField?.(service.password, "Пароль")}
-                          >
-                            Копировать
-                          </button>
-                        </div>
-                      </div>
-                      {service.notes && <div className="notes">{service.notes}</div>}
-                    </div>
-                  </article>
+                    </td>
+                  </tr>
                 ))}
-              </div>
-            </div>
-          ))
+              </tbody>
+            </table>
+          </div>
         )}
-      </main>
-    </>
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Запрос доступа</h2>
+            <p>Выберите сервис из списка и отправьте запрос руководителю.</p>
+          </div>
+        </div>
+
+        <form className="toolbar-row form-inline" onSubmit={onCreateAccessRequest}>
+          <select value={accessRequestForm.service_id} onChange={onAccessRequestChange("service_id")}>
+            <option value="">Выберите сервис</option>
+            {requestableServices.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            placeholder="Причина"
+            value={accessRequestForm.justification}
+            onChange={onAccessRequestChange("justification")}
+          />
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={accessRequestStatus.loading || !accessRequestForm.service_id}
+          >
+            {accessRequestStatus.loading ? "Отправка..." : "Отправить"}
+          </button>
+        </form>
+
+        <details className="help-list">
+          <summary>Список доступных сервисов ({requestableServices.length})</summary>
+          <ul>
+            {requestableServices.map((service) => (
+              <li key={service.id}>
+                <span>{service.name}</span>
+                {service.url && (
+                  <a href={service.url} target="_blank" rel="noreferrer">
+                    Открыть
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+
+        {accessRequestStatus.error && <div className="inline-error">{accessRequestStatus.error}</div>}
+        {accessRequestStatus.success && <div className="inline-success">{accessRequestStatus.success}</div>}
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Мои заявки</h2>
+            <p>Отслеживание статусов запросов.</p>
+          </div>
+        </div>
+
+        <div className="toolbar-row">
+          <select value={ownRequestFilters.status} onChange={onOwnRequestFilterChange("status")}>
+            <option value="all">Все статусы</option>
+            <option value="pending">Ожидает</option>
+            <option value="approved">Одобрен</option>
+            <option value="rejected">Отклонен</option>
+            <option value="canceled">Отменен</option>
+          </select>
+          <select value={ownRequestFilters.service} onChange={onOwnRequestFilterChange("service")}>
+            <option value="all">Все сервисы</option>
+            {ownRequestServiceOptions.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="search"
+            placeholder="Поиск"
+            value={ownRequestFilters.query}
+            onChange={onOwnRequestFilterChange("query")}
+          />
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={onExportOwnRequestsCsv}
+            disabled={ownAccessRequests.length === 0}
+            title="Экспорт CSV"
+          >
+            CSV
+          </button>
+        </div>
+
+        {ownAccessRequests.length === 0 ? (
+          <div className="empty-state">Нет заявок. Выберите сервис и отправьте первый запрос.</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Сервис</th>
+                  <th>Комментарий</th>
+                  <th>Дата</th>
+                  <th>Статус</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownAccessRequests.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.service?.name || "Сервис"}</td>
+                    <td>{item.justification || "—"}</td>
+                    <td>{item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "—"}</td>
+                    <td>{requestStatusLabel[item.status] || item.status}</td>
+                    <td>
+                      {item.status === "pending" ? (
+                        <button
+                          className="btn btn-danger btn-sm"
+                          type="button"
+                          onClick={() => onCancelAccessRequest(item.id)}
+                          disabled={accessRequestStatus.loading}
+                        >
+                          Отменить
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="hint">Показано {ownAccessRequests.length} из {ownAccessRequestsTotal}</div>
+      </div>
+    </section>
   );
 }
