@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
+
 # import dj_database_url 
 
 load_dotenv()
@@ -38,6 +40,10 @@ CORS_ALLOWED_ORIGINS = env_list(
 CORS_ALLOWED_ORIGIN_REGEXES = env_list("DJANGO_CORS_ALLOWED_ORIGIN_REGEXES")
 CORS_ALLOW_CREDENTIALS = os.getenv("DJANGO_CORS_ALLOW_CREDENTIALS", "False") == "True"
 CORS_EXPOSE_HEADERS = env_list("DJANGO_CORS_EXPOSE_HEADERS", "content-disposition")
+CORS_ALLOW_HEADERS = list(default_headers) + env_list(
+    "DJANGO_CORS_ALLOW_HEADERS_EXTRA",
+    "ngrok-skip-browser-warning",
+)
 
 
 # Application definition
@@ -231,7 +237,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
