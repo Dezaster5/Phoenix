@@ -66,6 +66,62 @@ For custom dev environments (for example WSL/Windows networking), set `frontend/
 VITE_PROXY_TARGET=http://127.0.0.1:8000
 ```
 
+## Test Deploy: Backend via ngrok + Frontend via Vercel
+This is a quick test setup (not production).
+
+1. Start backend in Docker:
+```bash
+docker compose up -d --build
+```
+
+2. Start tunnel to backend (choose one):
+```bash
+# local ngrok binary
+ngrok http 8000
+```
+or
+```bash
+# dockerized ngrok (uses service from docker-compose.yml)
+docker compose --profile tunnel up -d ngrok
+docker compose logs -f ngrok
+```
+Before dockerized ngrok, set `NGROK_AUTHTOKEN` in `.env`.
+Copy the HTTPS URL, for example: `https://abc123.ngrok-free.app`
+
+3. Update backend env (`.env`) and restart backend:
+```env
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,abc123.ngrok-free.app
+DJANGO_CSRF_TRUSTED_ORIGINS=https://abc123.ngrok-free.app,https://your-vercel-domain.vercel.app
+DJANGO_CORS_ALLOWED_ORIGINS=https://abc123.ngrok-free.app,https://your-vercel-domain.vercel.app
+```
+Optional for changing ngrok domains:
+```env
+DJANGO_CORS_ALLOWED_ORIGIN_REGEXES=https://.*\.ngrok-free\.app
+```
+Then restart:
+```bash
+docker compose up -d --build web
+```
+
+4. Deploy frontend to Vercel:
+- Import this repo in Vercel.
+- Set `Root Directory` to `frontend`.
+- Build command: `npm run build`
+- Output directory: `dist`
+- Add env var:
+```env
+VITE_API_URL=https://abc123.ngrok-free.app/api
+```
+- Redeploy frontend.
+
+5. Smoke check:
+- Open Vercel URL.
+- Login should call `https://abc123.ngrok-free.app/api/auth/login/`.
+- Open browser devtools and confirm no CORS errors.
+
+Note: with ngrok your laptop is the actual backend server. ngrok only forwards traffic. If laptop sleeps, turns off, or Docker stops, backend becomes unavailable.
+
 ## Important Endpoints
 - API root: `http://localhost:8000/api/`
 - Schema: `http://localhost:8000/api/schema/`

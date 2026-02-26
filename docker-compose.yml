@@ -41,5 +41,17 @@ services:
     ports:
       - "8080:8080"
 
+  ngrok:
+    image: ngrok/ngrok:latest
+    profiles:
+      - tunnel
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    command: http web:8000
+    depends_on:
+      - web
+    ports:
+      - "4040:4040"
+
 volumes:
   postgres_data:

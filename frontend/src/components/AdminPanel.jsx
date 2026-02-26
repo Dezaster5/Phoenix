@@ -49,6 +49,10 @@ const getSecretPreview = (value) => {
 export default function AdminPanel({
   isSuperuser,
   isDepartmentHead,
+  viewerUserId,
+  viewerFullName,
+  viewerDepartment,
+  roleLabel,
   adminTab,
   onAdminTabChange,
   adminForm,
@@ -112,6 +116,7 @@ export default function AdminPanel({
   const [sharesQuery, setSharesQuery] = useState("");
   const [credentialQuery, setCredentialQuery] = useState("");
   const [selfQuery, setSelfQuery] = useState("");
+  const [sharedQuery, setSharedQuery] = useState("");
 
   const [selectedCredentialUserId, setSelectedCredentialUserId] = useState("");
   const [credentialDetails, setCredentialDetails] = useState(null);
@@ -172,6 +177,30 @@ export default function AdminPanel({
       onAdminTabChange("department");
     }
   }, [adminTab, isDepartmentHead, isSuperuser, onAdminTabChange]);
+
+  const receivedDepartmentShares = useMemo(
+    () =>
+      (activeShares || []).filter(
+        (share) =>
+          Number(share.grantee?.id || 0) === Number(viewerUserId || 0) &&
+          Number(share.department?.id || 0) > 0
+      ),
+    [activeShares, viewerUserId]
+  );
+
+  const selectedSharedDepartment = useMemo(() => {
+    if (!String(adminTab).startsWith("shared:")) {
+      return null;
+    }
+    const shareId = Number(String(adminTab).split(":")[1] || 0);
+    return receivedDepartmentShares.find((share) => share.id === shareId) || null;
+  }, [adminTab, receivedDepartmentShares]);
+
+  useEffect(() => {
+    if (String(adminTab).startsWith("shared:") && !selectedSharedDepartment) {
+      onAdminTabChange("department");
+    }
+  }, [adminTab, selectedSharedDepartment, onAdminTabChange]);
 
   const filteredDepartmentUsers = useMemo(() => {
     const q = usersQuery.trim().toLowerCase();
@@ -281,11 +310,47 @@ export default function AdminPanel({
   const selfTotalPages = Math.max(1, Math.ceil(filteredSelfCredentials.length / PAGE_SIZE));
   const selfPageRows = filteredSelfCredentials.slice((credentialPage - 1) * PAGE_SIZE, credentialPage * PAGE_SIZE);
 
+  const filteredSharedCredentials = useMemo(() => {
+    if (!selectedSharedDepartment) {
+      return [];
+    }
+    const sharedDepartmentId = Number(selectedSharedDepartment.department?.id || 0);
+    const q = sharedQuery.trim().toLowerCase();
+
+    return (adminCredentials || []).filter((credential) => {
+      if (Number(credential.user?.department?.id || 0) !== sharedDepartmentId) {
+        return false;
+      }
+      if (
+        filters.credentialService !== "all" &&
+        String(credential.service?.id) !== String(filters.credentialService)
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      return [credential.service?.name, credential.login, credential.notes, credential.secret_type]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(q));
+    });
+  }, [selectedSharedDepartment, sharedQuery, adminCredentials, filters.credentialService]);
+
+  const sharedTotalPages = Math.max(1, Math.ceil(filteredSharedCredentials.length / PAGE_SIZE));
+  const sharedPageRows = filteredSharedCredentials.slice(
+    (credentialPage - 1) * PAGE_SIZE,
+    credentialPage * PAGE_SIZE
+  );
+
   useEffect(() => {
     if (adminTab === "self" && credentialPage > selfTotalPages) {
       setCredentialPage(selfTotalPages);
     }
   }, [adminTab, credentialPage, selfTotalPages, setCredentialPage]);
+
+  useEffect(() => {
+    if (String(adminTab).startsWith("shared:") && credentialPage > sharedTotalPages) {
+      setCredentialPage(sharedTotalPages);
+    }
+  }, [adminTab, credentialPage, sharedTotalPages, setCredentialPage]);
 
   const togglePasswordVisibility = (rowId) => {
     const currentTs = Date.now();
@@ -337,6 +402,13 @@ export default function AdminPanel({
   return (
     <section className="admin-layout">
       <div className="admin-sidebar-stack">
+        <aside className="admin-sidebar admin-sidebar-secondary">
+          <h3>Профиль</h3>
+          <p className="sidebar-profile-name">{viewerFullName || "Без ФИО"}</p>
+          <p className="hint">Роль: {roleLabel}</p>
+          <p className="hint">Отдел: {viewerDepartment}</p>
+        </aside>
+
         <aside className="admin-sidebar">
           <h2>Панель руководителя</h2>
           <nav>
@@ -374,6 +446,37 @@ export default function AdminPanel({
             </button>
           </aside>
         )}
+
+        {isDepartmentHead &&
+          !isSuperuser &&
+          receivedDepartmentShares.map((share) => {
+            const shareTabId = `shared:${share.id}`;
+            const grantorLabel =
+              share.grantor?.full_name || share.grantor?.portal_login || "руководителя";
+            const departmentName = share.department?.name || "без названия";
+            const sharedCount = (adminCredentials || []).filter(
+              (credential) =>
+                Number(credential.user?.department?.id || 0) === Number(share.department?.id || 0)
+            ).length;
+
+            return (
+              <aside key={share.id} className="admin-sidebar admin-sidebar-secondary">
+                <h3>{`Отдел ${grantorLabel}`}</h3>
+                <p className="hint">Только отдел: {departmentName}</p>
+                <button
+                  type="button"
+                  className={`sidebar-link ${adminTab === shareTabId ? "is-active" : ""}`}
+                  onClick={() => {
+                    setCredentialPage(1);
+                    onAdminTabChange(shareTabId);
+                  }}
+                >
+                  <span>Открыть</span>
+                  <span className="sidebar-badge">{sharedCount}</span>
+                </button>
+              </aside>
+            );
+          })}
       </div>
 
       <main className="admin-content">
@@ -966,6 +1069,145 @@ export default function AdminPanel({
                 type="button"
                 disabled={credentialPage === selfTotalPages}
                 onClick={() => setCredentialPage((prev) => Math.min(selfTotalPages, prev + 1))}
+              >
+                Вперед
+              </button>
+            </div>
+          </section>
+        )}
+
+        {String(adminTab).startsWith("shared:") && selectedSharedDepartment && (
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>{`Отдел ${
+                  selectedSharedDepartment.grantor?.full_name ||
+                  selectedSharedDepartment.grantor?.portal_login ||
+                  "руководителя"
+                }`}</h2>
+                <p>
+                  Только просмотр отдела: {selectedSharedDepartment.department?.name || "Без отдела"}.
+                </p>
+              </div>
+            </div>
+
+            <div className="toolbar-row">
+              <input
+                type="search"
+                placeholder="Поиск по сервису или логину"
+                value={sharedQuery}
+                onChange={(event) => {
+                  setSharedQuery(event.target.value);
+                  setCredentialPage(1);
+                }}
+              />
+              <select value={filters.credentialService} onChange={onFilterChange("credentialService")}>
+                <option value="all">Все сервисы</option>
+                {adminServices.map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {sharedPageRows.length === 0 ? (
+              <div className="empty-state">По этому отделу пока нет доступов.</div>
+            ) : (
+              <div className="table-wrap">
+                <table className="table table-credentials">
+                  <thead>
+                    <tr>
+                      <th>Сервис</th>
+                      <th>Логин</th>
+                      <th>Пароль / Ключ</th>
+                      <th>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sharedPageRows.map((credential) => (
+                      <tr key={credential.id}>
+                        <td>{credential.service?.name || "Сервис"}</td>
+                        <td>
+                          {credential.secret_type === "ssh_key" || credential.secret_type === "api_token" ? (
+                            "—"
+                          ) : (
+                            <button
+                              className="cell-link"
+                              type="button"
+                              onClick={() => copyText(credential.login, "Логин")}
+                              title="Нажмите, чтобы скопировать логин"
+                            >
+                              {credential.login}
+                            </button>
+                          )}
+                        </td>
+                        <td>
+                          <div className="password-cell">
+                            <button
+                              className="icon-button"
+                              type="button"
+                              onClick={() => togglePasswordVisibility(credential.id)}
+                              aria-label={isPasswordVisible(credential.id) ? "Скрыть секрет" : "Показать секрет"}
+                              title={isPasswordVisible(credential.id) ? "Скрыть секрет" : "Показать секрет"}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path
+                                  d="M12 5C6 5 2.2 9.4 1 12c1.2 2.6 5 7 11 7s9.8-4.4 11-7c-1.2-2.6-5-7-11-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"
+                                  fill="currentColor"
+                                />
+                              </svg>
+                            </button>
+                            {isPasswordVisible(credential.id) ? (
+                              <button
+                                className="cell-link secret-preview"
+                                type="button"
+                                onClick={() => copyText(credential.password, "Секрет")}
+                              >
+                                {getSecretPreview(credential.password)}
+                              </button>
+                            ) : (
+                              <span>••••••••</span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <button
+                            className="icon-button"
+                            title="Действия"
+                            aria-label="Действия"
+                            type="button"
+                            onClick={(event) =>
+                              openFloatingMenu(event, "credential", { id: credential.id, credential }, 220)
+                            }
+                          >
+                            ⋯
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="pagination-row">
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                disabled={credentialPage === 1}
+                onClick={() => setCredentialPage((prev) => Math.max(1, prev - 1))}
+              >
+                Назад
+              </button>
+              <span>
+                {credentialPage} / {sharedTotalPages}
+              </span>
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                disabled={credentialPage === sharedTotalPages}
+                onClick={() => setCredentialPage((prev) => Math.min(sharedTotalPages, prev + 1))}
               >
                 Вперед
               </button>

@@ -24,6 +24,7 @@ import {
 } from "./api";
 import AdminPanel from "./components/AdminPanel";
 import AppHeader from "./components/AppHeader";
+import AppSidebar from "./components/AppSidebar";
 import AuthPage from "./components/AuthPage";
 import ServicesPage from "./components/ServicesPage";
 import VaultPage from "./components/VaultPage";
@@ -243,7 +244,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState(() => {
     const storedRole = localStorage.getItem("phoenixRole") || "employee";
     const storedIsSuperuser = localStorage.getItem("phoenixIsSuperuser") === "1";
-    return isHeadRole(storedRole) && !storedIsSuperuser ? "admin" : "vault";
+    return storedIsSuperuser || isHeadRole(storedRole) ? "admin" : "vault";
   });
   const [adminTab, setAdminTab] = useState("department");
 
@@ -265,10 +266,10 @@ export default function App() {
   }, [canManage, currentView]);
 
   useEffect(() => {
-    if (isDepartmentHead && !isSuperuser && currentView === "vault") {
+    if (canManage && currentView !== "admin") {
       setCurrentView("admin");
     }
-  }, [isDepartmentHead, isSuperuser, currentView]);
+  }, [canManage, currentView]);
 
   useEffect(() => {
     if (!canOpenServicesTab && currentView === "services") {
@@ -278,7 +279,8 @@ export default function App() {
 
   useEffect(() => {
     const allowedTabs = new Set(["department", "shares", "requests", "self"]);
-    if (!allowedTabs.has(adminTab)) {
+    const isSharedDepartmentTab = String(adminTab).startsWith("shared:");
+    if (!allowedTabs.has(adminTab) && !isSharedDepartmentTab) {
       setAdminTab("department");
     }
   }, [adminTab]);
@@ -467,7 +469,7 @@ export default function App() {
     setViewerDepartmentId(Number(data.department?.id || 0));
     setViewerFullName(data.full_name || data.portal_login || "");
     setViewerDepartment(data.department?.name || "Без отдела");
-    setCurrentView(isHeadRole(data.role) && !data.is_superuser ? "admin" : "vault");
+    setCurrentView(data.is_superuser || isHeadRole(data.role) ? "admin" : "vault");
     setAdminTab("department");
     setPortalLogin("");
     setLoginCode("");
@@ -1161,11 +1163,6 @@ export default function App() {
     [reviewableAccessRequests, reviewRequestFilters]
   );
 
-  const pendingReviewRequestsCount = useMemo(
-    () => reviewableAccessRequests.filter((item) => item.status === "pending").length,
-    [reviewableAccessRequests]
-  );
-
   const exportAccessRequestsCsv = (items, prefix) => {
     try {
       const headers = [
@@ -1244,7 +1241,7 @@ export default function App() {
   );
 
   return (
-    <div className={`page ${currentView === "admin" ? "page-admin" : ""}`}>
+    <div className={`page ${isAuthenticated ? "page-admin" : ""}`}>
       <div className="bg-orbs" aria-hidden="true">
         <span className="orb orb-one" />
         <span className="orb orb-two" />
@@ -1253,15 +1250,6 @@ export default function App() {
 
       <AppHeader
         isAuthenticated={isAuthenticated}
-        viewerDepartment={viewerDepartment}
-        viewerFullName={viewerFullName}
-        roleLabel={roleLabel}
-        canManage={canManage}
-        canOpenServicesTab={canOpenServicesTab}
-        showVaultTab={showVaultTab}
-        currentView={currentView}
-        pendingRequestsCount={pendingReviewRequestsCount}
-        onToggleView={(targetView) => setCurrentView(targetView)}
         onLogout={handleLogout}
       />
 
@@ -1284,36 +1272,54 @@ export default function App() {
           copied={copied}
           onCopyTemplate={handleCopyTemplate}
         />
-      ) : currentView === "vault" && showVaultTab ? (
-        <VaultPage
-          serviceGroupsCount={sections.length}
-          search={search}
-          onSearchChange={setSearch}
-          serviceFilter={serviceFilter}
-          onServiceFilterChange={setServiceFilter}
-          serviceOptions={serviceOptions}
-          filteredSections={filteredSections}
-          onCopyField={handleCopyCredentialValue}
-          onDownloadCredentialSecret={handleDownloadCredentialSecret}
-        />
-      ) : currentView === "services" && canOpenServicesTab ? (
-        <ServicesPage
-          requestableServices={requestableServices}
-          accessRequestForm={accessRequestForm}
-          onAccessRequestChange={handleAccessRequestChange}
-          onCreateAccessRequest={handleCreateAccessRequest}
-          accessRequestStatus={accessRequestStatus}
-          ownAccessRequests={ownFilteredAccessRequests}
-          ownAccessRequestsTotal={ownAccessRequests.length}
-          ownRequestFilters={ownRequestFilters}
-          ownRequestServiceOptions={ownRequestServiceOptions}
-          onOwnRequestFilterChange={handleOwnRequestFilterChange}
-          onExportOwnRequestsCsv={() =>
-            exportAccessRequestsCsv(ownFilteredAccessRequests, "my_access_requests")
-          }
-          onCancelAccessRequest={handleCancelAccessRequest}
-        />
       ) : null}
+
+      {isAuthenticated && currentView !== "admin" && (
+        <section className="workspace-shell">
+          <AppSidebar
+            viewerFullName={viewerFullName}
+            viewerDepartment={viewerDepartment}
+            roleLabel={roleLabel}
+            currentView={currentView}
+            canOpenServicesTab={canOpenServicesTab}
+            showVaultTab={showVaultTab}
+            onToggleView={setCurrentView}
+          />
+
+          <div className="workspace-main">
+            {currentView === "vault" && showVaultTab ? (
+              <VaultPage
+                serviceGroupsCount={sections.length}
+                search={search}
+                onSearchChange={setSearch}
+                serviceFilter={serviceFilter}
+                onServiceFilterChange={setServiceFilter}
+                serviceOptions={serviceOptions}
+                filteredSections={filteredSections}
+                onCopyField={handleCopyCredentialValue}
+                onDownloadCredentialSecret={handleDownloadCredentialSecret}
+              />
+            ) : currentView === "services" && canOpenServicesTab ? (
+              <ServicesPage
+                requestableServices={requestableServices}
+                accessRequestForm={accessRequestForm}
+                onAccessRequestChange={handleAccessRequestChange}
+                onCreateAccessRequest={handleCreateAccessRequest}
+                accessRequestStatus={accessRequestStatus}
+                ownAccessRequests={ownFilteredAccessRequests}
+                ownAccessRequestsTotal={ownAccessRequests.length}
+                ownRequestFilters={ownRequestFilters}
+                ownRequestServiceOptions={ownRequestServiceOptions}
+                onOwnRequestFilterChange={handleOwnRequestFilterChange}
+                onExportOwnRequestsCsv={() =>
+                  exportAccessRequestsCsv(ownFilteredAccessRequests, "my_access_requests")
+                }
+                onCancelAccessRequest={handleCancelAccessRequest}
+              />
+            ) : null}
+          </div>
+        </section>
+      )}
 
       {isAuthenticated && canManage && currentView === "admin" && (
         <AdminPanel
@@ -1343,6 +1349,10 @@ export default function App() {
           onFilterChange={handleFilterChange}
           canWriteForUser={canWriteForUser}
           isDepartmentHead={isDepartmentHead}
+          viewerUserId={viewerUserId}
+          viewerFullName={viewerFullName}
+          viewerDepartment={viewerDepartment}
+          roleLabel={roleLabel}
           credentialForm={credentialForm}
           onCredentialChange={handleCredentialChange}
           onCredentialFileChange={handleCredentialFileChange}
