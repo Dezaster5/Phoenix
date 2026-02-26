@@ -1,5 +1,27 @@
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
+function buildHeaders(extra = {}) {
+  return {
+    Accept: "application/json",
+    "ngrok-skip-browser-warning": "true",
+    ...extra
+  };
+}
+
+async function parseJsonResponse(response, fallbackMessage) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = await response.text().catch(() => "");
+    const preview = text.slice(0, 80).replace(/\s+/g, " ").trim();
+    throw new Error(
+      `${fallbackMessage}. Сервер вернул не JSON (content-type: ${contentType || "unknown"}${
+        preview ? `, body: ${preview}` : ""
+      })`
+    );
+  }
+  return response.json();
+}
+
 export async function apiLogin(portalLogin, options = {}) {
   const payload = { portal_login: portalLogin };
   if (options.code) {
@@ -11,37 +33,40 @@ export async function apiLogin(portalLogin, options = {}) {
 
   const response = await fetch(`${API_BASE}/auth/login/`, {
     method: "POST",
-    headers: {
+    headers: buildHeaders({
       "Content-Type": "application/json"
-    },
+    }),
     body: JSON.stringify(payload)
   });
 
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка входа" }));
+    const detail = await parseJsonResponse(response, "Ошибка входа").catch(() => ({
+      detail: "Ошибка входа"
+    }));
     throw new Error(detail.detail || "Ошибка входа");
   }
 
-  return response.json();
+  return parseJsonResponse(response, "Ошибка входа");
 }
 
 async function apiGet(path, token) {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
+    headers: buildHeaders({
       Authorization: `Token ${token}`
-    }
+    })
   });
 
   if (!response.ok) {
     throw new Error("Ошибка загрузки данных");
   }
 
-  return response.json();
+  return parseJsonResponse(response, "Ошибка загрузки данных");
 }
 
 async function apiWrite(path, token, method, payload, fallbackMessage) {
   const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
   const headers = {
+    ...buildHeaders(),
     Authorization: `Token ${token}`
   };
   if (!isFormData) {
@@ -55,7 +80,9 @@ async function apiWrite(path, token, method, payload, fallbackMessage) {
   });
 
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: fallbackMessage }));
+    const detail = await parseJsonResponse(response, fallbackMessage).catch(() => ({
+      detail: fallbackMessage
+    }));
     const message = typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
     throw new Error(message || fallbackMessage);
   }
@@ -64,7 +91,7 @@ async function apiWrite(path, token, method, payload, fallbackMessage) {
     return true;
   }
 
-  return response.json();
+  return parseJsonResponse(response, fallbackMessage);
 }
 
 export async function apiFetchMe(token) {
@@ -147,13 +174,15 @@ export async function apiDeleteCredential(token, id) {
 export async function apiDownloadCredentialSecret(token, id) {
   const response = await fetch(`${API_BASE}/credentials/${id}/download-secret/`, {
     method: "GET",
-    headers: {
+    headers: buildHeaders({
       Authorization: `Token ${token}`
-    }
+    })
   });
 
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({ detail: "Ошибка скачивания секрета" }));
+    const detail = await parseJsonResponse(response, "Ошибка скачивания секрета").catch(() => ({
+      detail: "Ошибка скачивания секрета"
+    }));
     const message = typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
     throw new Error(message || "Ошибка скачивания секрета");
   }
