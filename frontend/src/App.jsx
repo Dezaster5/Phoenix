@@ -6,6 +6,7 @@ import {
   apiCreateAccessRequest,
   apiCreateDepartmentShare,
   apiCreateUser,
+  apiDownloadCredentialSecret,
   apiDeleteUser,
   apiDeleteCredential,
   apiDeleteDepartmentShare,
@@ -24,6 +25,7 @@ import {
 import AdminPanel from "./components/AdminPanel";
 import AppHeader from "./components/AppHeader";
 import AuthPage from "./components/AuthPage";
+import ServicesPage from "./components/ServicesPage";
 import VaultPage from "./components/VaultPage";
 import { demoSections } from "./data/demo";
 
@@ -53,6 +55,12 @@ const groupCredentialsByService = (credentials) => {
       name: serviceName,
       url: serviceUrl,
       login: cred.login,
+      secret_type: cred.secret_type || "password",
+      secret_filename: cred.secret_filename || "",
+      ssh_host: cred.ssh_host || "",
+      ssh_port: cred.ssh_port || 22,
+      ssh_algorithm: cred.ssh_algorithm || "",
+      ssh_fingerprint: cred.ssh_fingerprint || "",
       password: cred.password,
       notes: cred.notes,
       owner_login: cred.user?.portal_login || "",
@@ -67,7 +75,6 @@ const groupCredentialsByService = (credentials) => {
 const requestTemplate = `Здравствуйте!\n\nПрошу выдать логин для доступа в Phoenix Vault.\nФИО: ____\nОтдел: ____\nДолжность: ____\nКорпоративная почта: ____\nНужные сервисы: ____\n\nСпасибо!`;
 const requestEmail = "penxren20052110@gmail.com";
 const requestSubject = "Запрос логина Phoenix Vault";
-const PAGE_SIZE = 6;
 
 const translitMap = {
   а: "a",
@@ -137,6 +144,9 @@ export default function App() {
   const [viewerLogin, setViewerLogin] = useState(
     () => localStorage.getItem("phoenixPortalLogin") || ""
   );
+  const [viewerUserId, setViewerUserId] = useState(
+    () => Number(localStorage.getItem("phoenixUserId") || 0)
+  );
   const [viewerDepartmentId, setViewerDepartmentId] = useState(
     () => Number(localStorage.getItem("phoenixDepartmentId") || 0)
   );
@@ -183,13 +193,19 @@ export default function App() {
   });
   const [reviewComments, setReviewComments] = useState({});
   const [filters, setFilters] = useState({
-    credentialUser: "all",
     credentialService: "all"
   });
   const [credentialPage, setCredentialPage] = useState(1);
   const [editCredentialId, setEditCredentialId] = useState(null);
   const [editCredentialForm, setEditCredentialForm] = useState({
     login: "",
+    secret_type: "password",
+    secret_filename: "",
+    ssh_host: "",
+    ssh_port: 22,
+    ssh_algorithm: "",
+    ssh_public_key: "",
+    ssh_fingerprint: "",
     password: "",
     notes: ""
   });
@@ -204,6 +220,14 @@ export default function App() {
     user_id: "",
     service_id: "",
     login: "",
+    secret_type: "password",
+    secret_filename: "",
+    ssh_host: "",
+    ssh_port: 22,
+    ssh_algorithm: "",
+    ssh_public_key: "",
+    ssh_fingerprint: "",
+    secret_file: null,
     password: "",
     notes: ""
   });
@@ -216,12 +240,18 @@ export default function App() {
     service_id: "",
     justification: ""
   });
-  const [currentView, setCurrentView] = useState("vault");
-  const [adminTab, setAdminTab] = useState("users");
+  const [currentView, setCurrentView] = useState(() => {
+    const storedRole = localStorage.getItem("phoenixRole") || "employee";
+    const storedIsSuperuser = localStorage.getItem("phoenixIsSuperuser") === "1";
+    return isHeadRole(storedRole) && !storedIsSuperuser ? "admin" : "vault";
+  });
+  const [adminTab, setAdminTab] = useState("department");
 
   const isAuthenticated = Boolean(token);
   const isDepartmentHead = isHeadRole(role);
   const canManage = isSuperuser || isDepartmentHead;
+  const canOpenServicesTab = !canManage;
+  const showVaultTab = !canManage;
   const roleLabel = isSuperuser
     ? "Супер-админ"
     : isDepartmentHead
@@ -235,9 +265,21 @@ export default function App() {
   }, [canManage, currentView]);
 
   useEffect(() => {
-    const allowedTabs = new Set(["users", "shares", "credentials", "requests", "directory"]);
+    if (isDepartmentHead && !isSuperuser && currentView === "vault") {
+      setCurrentView("admin");
+    }
+  }, [isDepartmentHead, isSuperuser, currentView]);
+
+  useEffect(() => {
+    if (!canOpenServicesTab && currentView === "services") {
+      setCurrentView("vault");
+    }
+  }, [canOpenServicesTab, currentView]);
+
+  useEffect(() => {
+    const allowedTabs = new Set(["department", "shares", "requests", "self"]);
     if (!allowedTabs.has(adminTab)) {
-      setAdminTab("users");
+      setAdminTab("department");
     }
   }, [adminTab]);
 
@@ -265,12 +307,14 @@ export default function App() {
         setRole(me.role);
         setIsSuperuser(Boolean(me.is_superuser));
         setViewerLogin(me.portal_login || "");
+        setViewerUserId(Number(me.id || 0));
         setViewerDepartmentId(Number(me.department?.id || 0));
         setViewerFullName(me.full_name || me.portal_login || "");
         setViewerDepartment(me.department?.name || "Без отдела");
         localStorage.setItem("phoenixRole", me.role || "employee");
         localStorage.setItem("phoenixIsSuperuser", me.is_superuser ? "1" : "0");
         localStorage.setItem("phoenixPortalLogin", me.portal_login || "");
+        localStorage.setItem("phoenixUserId", String(me.id || 0));
         localStorage.setItem("phoenixDepartmentId", String(me.department?.id || 0));
         localStorage.setItem("phoenixFullName", me.full_name || "");
         localStorage.setItem("phoenixDepartment", me.department?.name || "Без отдела");
@@ -332,7 +376,7 @@ export default function App() {
 
   useEffect(() => {
     setCredentialPage(1);
-  }, [filters.credentialUser, filters.credentialService]);
+  }, [filters.credentialService]);
 
   const filteredSections = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -407,26 +451,28 @@ export default function App() {
   };
 
   const applyAuthData = (data) => {
-      localStorage.setItem("phoenixToken", data.token);
-      localStorage.setItem("phoenixRole", data.role);
-      localStorage.setItem("phoenixIsSuperuser", data.is_superuser ? "1" : "0");
-      localStorage.setItem("phoenixPortalLogin", data.portal_login || "");
-      localStorage.setItem("phoenixDepartmentId", String(data.department?.id || 0));
-      localStorage.setItem("phoenixFullName", data.full_name || "");
-      localStorage.setItem("phoenixDepartment", data.department?.name || "Без отдела");
-      setToken(data.token);
-      setRole(data.role);
-      setIsSuperuser(Boolean(data.is_superuser));
-      setViewerLogin(data.portal_login || "");
-      setViewerDepartmentId(Number(data.department?.id || 0));
-      setViewerFullName(data.full_name || data.portal_login || "");
-      setViewerDepartment(data.department?.name || "Без отдела");
-      setCurrentView("vault");
-      setAdminTab("users");
-      setPortalLogin("");
-      setLoginCode("");
-      setChallengeRequired(false);
-      setStatus({ loading: false, error: "", mode: "live" });
+    localStorage.setItem("phoenixToken", data.token);
+    localStorage.setItem("phoenixRole", data.role);
+    localStorage.setItem("phoenixIsSuperuser", data.is_superuser ? "1" : "0");
+    localStorage.setItem("phoenixPortalLogin", data.portal_login || "");
+    localStorage.setItem("phoenixUserId", String(data.id || 0));
+    localStorage.setItem("phoenixDepartmentId", String(data.department?.id || 0));
+    localStorage.setItem("phoenixFullName", data.full_name || "");
+    localStorage.setItem("phoenixDepartment", data.department?.name || "Без отдела");
+    setToken(data.token);
+    setRole(data.role);
+    setIsSuperuser(Boolean(data.is_superuser));
+    setViewerLogin(data.portal_login || "");
+    setViewerUserId(Number(data.id || 0));
+    setViewerDepartmentId(Number(data.department?.id || 0));
+    setViewerFullName(data.full_name || data.portal_login || "");
+    setViewerDepartment(data.department?.name || "Без отдела");
+    setCurrentView(isHeadRole(data.role) && !data.is_superuser ? "admin" : "vault");
+    setAdminTab("department");
+    setPortalLogin("");
+    setLoginCode("");
+    setChallengeRequired(false);
+    setStatus({ loading: false, error: "", mode: "live" });
   };
 
   useEffect(() => {
@@ -456,6 +502,7 @@ export default function App() {
     localStorage.removeItem("phoenixRole");
     localStorage.removeItem("phoenixIsSuperuser");
     localStorage.removeItem("phoenixPortalLogin");
+    localStorage.removeItem("phoenixUserId");
     localStorage.removeItem("phoenixDepartmentId");
     localStorage.removeItem("phoenixFullName");
     localStorage.removeItem("phoenixDepartment");
@@ -463,6 +510,7 @@ export default function App() {
     setRole("employee");
     setIsSuperuser(false);
     setViewerLogin("");
+    setViewerUserId(0);
     setViewerDepartmentId(0);
     setViewerFullName("");
     setViewerDepartment("Без отдела");
@@ -475,7 +523,7 @@ export default function App() {
     setReviewRequestFilters({ status: "all", service: "all", query: "" });
     setServiceFilter("all");
     setCurrentView("vault");
-    setAdminTab("users");
+    setAdminTab("department");
     setLoginCode("");
     setChallengeRequired(false);
   };
@@ -503,6 +551,15 @@ export default function App() {
       showToast(`${label} скопирован`);
     } catch {
       showToast("Не удалось скопировать", "error");
+    }
+  };
+
+  const handleDownloadCredentialSecret = async (credentialId) => {
+    try {
+      await apiDownloadCredentialSecret(token, credentialId);
+      showToast("SSH ключ скачан");
+    } catch (err) {
+      showToast(err.message || "Не удалось скачать SSH ключ", "error");
     }
   };
 
@@ -573,16 +630,27 @@ export default function App() {
   };
 
   const handleDeactivateUser = async (user) => {
-    if (!window.confirm(`Деактивировать пользователя ${user.portal_login}?`)) {
+    const isActivating = !user.is_active;
+    if (
+      !window.confirm(
+        `${isActivating ? "Активировать" : "Деактивировать"} пользователя ${user.portal_login}?`
+      )
+    ) {
       return;
     }
     setAdminStatus({ loading: true, error: "", success: "" });
     try {
-      await apiDeleteUser(token, user.id);
-      setAdminUsers((prev) =>
-        prev.map((item) => (item.id === user.id ? { ...item, is_active: false } : item))
-      );
-      setAdminStatus({ loading: false, error: "", success: "Пользователь деактивирован" });
+      if (isActivating) {
+        const updated = await apiUpdateUser(token, user.id, { is_active: true });
+        setAdminUsers((prev) => prev.map((item) => (item.id === user.id ? updated : item)));
+        setAdminStatus({ loading: false, error: "", success: "Пользователь активирован" });
+      } else {
+        await apiDeleteUser(token, user.id);
+        setAdminUsers((prev) =>
+          prev.map((item) => (item.id === user.id ? { ...item, is_active: false } : item))
+        );
+        setAdminStatus({ loading: false, error: "", success: "Пользователь деактивирован" });
+      }
     } catch (err) {
       setAdminStatus({ loading: false, error: err.message, success: "" });
     }
@@ -601,14 +669,10 @@ export default function App() {
         setCredentialStatus({ loading: false, error: "", success: "У пользователя нет активных доступов" });
         return;
       }
-      const updatedMap = new Map();
       for (const credential of targets) {
-        const updated = await apiUpdateCredential(token, credential.id, { is_active: false });
-        updatedMap.set(updated.id, updated);
+        await apiUpdateCredential(token, credential.id, { is_active: false });
       }
-      setAdminCredentials((prev) =>
-        prev.map((item) => (updatedMap.has(item.id) ? updatedMap.get(item.id) : item))
-      );
+      await refreshAdminCredentials();
       setCredentialStatus({ loading: false, error: "", success: "Доступы пользователя сброшены" });
     } catch (err) {
       setCredentialStatus({ loading: false, error: err.message, success: "" });
@@ -616,7 +680,38 @@ export default function App() {
   };
 
   const handleCredentialChange = (field) => (event) => {
-    setCredentialForm((prev) => ({ ...prev, [field]: event.target.value }));
+    const value = event.target.value;
+    setCredentialForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "secret_type") {
+        if (value !== "ssh_key") {
+          next.secret_filename = "";
+          next.ssh_host = "";
+          next.ssh_port = 22;
+          next.ssh_algorithm = "";
+          next.ssh_public_key = "";
+          next.ssh_fingerprint = "";
+          next.secret_file = null;
+        }
+        if (value === "ssh_key") {
+          next.login = "";
+          next.ssh_algorithm = next.ssh_algorithm || "ed25519";
+        } else if (value === "api_token") {
+          next.login = "";
+          next.secret_filename = "";
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleCredentialFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setCredentialForm((prev) => ({
+      ...prev,
+      secret_file: file,
+      secret_filename: file ? file.name : prev.secret_filename
+    }));
   };
 
   const handleShareChange = (field) => (event) => {
@@ -625,6 +720,11 @@ export default function App() {
 
   const handleAccessRequestChange = (field) => (event) => {
     setAccessRequestForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const refreshAdminCredentials = async () => {
+    const refreshed = await apiFetchCredentials(token);
+    setAdminCredentials(Array.isArray(refreshed) ? refreshed : refreshed.results || []);
   };
 
   const refreshAccessRequests = async () => {
@@ -775,22 +875,53 @@ export default function App() {
       if (!credentialForm.user_id || !credentialForm.service_id) {
         throw new Error("Выберите сотрудника и сервис.");
       }
-      if (!credentialForm.login.trim() || !credentialForm.password) {
-        throw new Error("Логин и пароль обязательны.");
+      if (credentialForm.secret_type === "password" && !credentialForm.login.trim()) {
+        throw new Error("Логин обязателен.");
+      }
+      if (!credentialForm.password && !credentialForm.secret_file) {
+        throw new Error("Секрет обязателен.");
       }
       const payload = {
         user: Number(credentialForm.user_id),
         service: Number(credentialForm.service_id),
-        login: credentialForm.login.trim(),
+        login:
+          credentialForm.secret_type === "ssh_key"
+            ? "ssh-key"
+            : credentialForm.secret_type === "api_token"
+              ? "api-token"
+              : credentialForm.login.trim(),
+        secret_type: credentialForm.secret_type || "password",
+        secret_filename: credentialForm.secret_filename || "",
+        ssh_host: credentialForm.ssh_host.trim(),
+        ssh_port: Number(credentialForm.ssh_port || 22),
+        ssh_algorithm: credentialForm.ssh_algorithm || "",
+        ssh_public_key: credentialForm.ssh_public_key.trim(),
+        ssh_fingerprint: credentialForm.ssh_fingerprint.trim(),
         password: credentialForm.password,
         notes: credentialForm.notes.trim(),
         is_active: true
       };
+      if (credentialForm.secret_file) {
+        payload.secret_file = credentialForm.secret_file;
+      }
       await apiCreateCredential(token, payload);
-      const refreshed = await apiFetchCredentials(token);
-      setAdminCredentials(Array.isArray(refreshed) ? refreshed : refreshed.results || []);
-      setCredentialForm({ user_id: "", service_id: "", login: "", password: "", notes: "" });
-      setCredentialStatus({ loading: false, error: "", success: "Креды сохранены" });
+      await refreshAdminCredentials();
+      setCredentialForm({
+        user_id: "",
+        service_id: "",
+        login: "",
+        secret_type: "password",
+        secret_filename: "",
+        ssh_host: "",
+        ssh_port: 22,
+        ssh_algorithm: "",
+        ssh_public_key: "",
+        ssh_fingerprint: "",
+        secret_file: null,
+        password: "",
+        notes: ""
+      });
+      setCredentialStatus({ loading: false, error: "", success: "Доступ сохранен" });
     } catch (err) {
       setCredentialStatus({ loading: false, error: err.message, success: "" });
     }
@@ -804,22 +935,20 @@ export default function App() {
     try {
       await apiDeleteCredential(token, credential.id);
       setAdminCredentials((prev) => prev.filter((item) => item.id !== credential.id));
-      setCredentialStatus({ loading: false, error: "", success: "Креды удалены" });
+      setCredentialStatus({ loading: false, error: "", success: "Доступ удален" });
     } catch (err) {
       setCredentialStatus({ loading: false, error: err.message, success: "" });
     }
   };
 
   const handleToggleCredential = async (credential) => {
-    setCredentialStatus({ loading: true, error: "", success: "" });
+      setCredentialStatus({ loading: true, error: "", success: "" });
     try {
-      const updated = await apiUpdateCredential(token, credential.id, {
+      await apiUpdateCredential(token, credential.id, {
         is_active: !credential.is_active
       });
-      setAdminCredentials((prev) =>
-        prev.map((item) => (item.id === credential.id ? updated : item))
-      );
-      setCredentialStatus({ loading: false, error: "", success: "Креды обновлены" });
+      await refreshAdminCredentials();
+      setCredentialStatus({ loading: false, error: "", success: "Доступ обновлен" });
     } catch (err) {
       setCredentialStatus({ loading: false, error: err.message, success: "" });
     }
@@ -833,37 +962,100 @@ export default function App() {
     setEditCredentialId(credential.id);
     setEditCredentialForm({
       login: credential.login || "",
+      secret_type: credential.secret_type || "password",
+      secret_filename: credential.secret_filename || "",
+      ssh_host: credential.ssh_host || "",
+      ssh_port: credential.ssh_port || 22,
+      ssh_algorithm: credential.ssh_algorithm || (credential.secret_type === "ssh_key" ? "ed25519" : ""),
+      ssh_public_key: credential.ssh_public_key || "",
+      ssh_fingerprint: credential.ssh_fingerprint || "",
       password: credential.password || "",
       notes: credential.notes || ""
     });
   };
 
   const handleEditCredentialChange = (field) => (event) => {
-    setEditCredentialForm((prev) => ({ ...prev, [field]: event.target.value }));
+    const value = event.target.value;
+    setEditCredentialForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "secret_type") {
+        if (value !== "ssh_key") {
+          next.secret_filename = "";
+          next.ssh_host = "";
+          next.ssh_port = 22;
+          next.ssh_algorithm = "";
+          next.ssh_public_key = "";
+          next.ssh_fingerprint = "";
+        }
+        if (value === "ssh_key") {
+          next.login = "";
+          next.ssh_algorithm = next.ssh_algorithm || "ed25519";
+        } else if (value === "api_token") {
+          next.login = "";
+          next.secret_filename = "";
+        }
+      }
+      return next;
+    });
   };
 
   const handleCancelEditCredential = () => {
     setEditCredentialId(null);
-    setEditCredentialForm({ login: "", password: "", notes: "" });
+    setEditCredentialForm({
+      login: "",
+      secret_type: "password",
+      secret_filename: "",
+      ssh_host: "",
+      ssh_port: 22,
+      ssh_algorithm: "",
+      ssh_public_key: "",
+      ssh_fingerprint: "",
+      password: "",
+      notes: ""
+    });
   };
 
   const handleSaveCredential = async (credential) => {
     setCredentialStatus({ loading: true, error: "", success: "" });
     try {
-      if (!editCredentialForm.login.trim() || !editCredentialForm.password) {
-        throw new Error("Логин и пароль обязательны.");
+      if (!editCredentialForm.password) {
+        throw new Error("Секрет обязателен.");
       }
-      const updated = await apiUpdateCredential(token, credential.id, {
-        login: editCredentialForm.login.trim(),
+      if (editCredentialForm.secret_type === "password" && !editCredentialForm.login.trim()) {
+        throw new Error("Логин обязателен.");
+      }
+      await apiUpdateCredential(token, credential.id, {
+        login:
+          editCredentialForm.secret_type === "ssh_key"
+            ? "ssh-key"
+            : editCredentialForm.secret_type === "api_token"
+              ? "api-token"
+              : editCredentialForm.login.trim(),
+        secret_type: editCredentialForm.secret_type || "password",
+        secret_filename: editCredentialForm.secret_filename || "",
+        ssh_host: editCredentialForm.ssh_host.trim(),
+        ssh_port: Number(editCredentialForm.ssh_port || 22),
+        ssh_algorithm: editCredentialForm.ssh_algorithm || "",
+        ssh_public_key: editCredentialForm.ssh_public_key.trim(),
+        ssh_fingerprint: editCredentialForm.ssh_fingerprint.trim(),
         password: editCredentialForm.password,
         notes: editCredentialForm.notes.trim()
       });
-      setAdminCredentials((prev) =>
-        prev.map((item) => (item.id === credential.id ? updated : item))
-      );
+      await refreshAdminCredentials();
       setEditCredentialId(null);
-      setEditCredentialForm({ login: "", password: "", notes: "" });
-      setCredentialStatus({ loading: false, error: "", success: "Креды обновлены" });
+      setEditCredentialForm({
+        login: "",
+        secret_type: "password",
+        secret_filename: "",
+        ssh_host: "",
+        ssh_port: 22,
+        ssh_algorithm: "",
+        ssh_public_key: "",
+        ssh_fingerprint: "",
+        password: "",
+        notes: ""
+      });
+      setCredentialStatus({ loading: false, error: "", success: "Доступ обновлен" });
     } catch (err) {
       setCredentialStatus({ loading: false, error: err.message, success: "" });
     }
@@ -969,6 +1161,11 @@ export default function App() {
     [reviewableAccessRequests, reviewRequestFilters]
   );
 
+  const pendingReviewRequestsCount = useMemo(
+    () => reviewableAccessRequests.filter((item) => item.status === "pending").length,
+    [reviewableAccessRequests]
+  );
+
   const exportAccessRequestsCsv = (items, prefix) => {
     try {
       const headers = [
@@ -1011,21 +1208,6 @@ export default function App() {
     }
   };
 
-  const filteredCredentials = adminCredentials.filter((credential) => {
-    const byUser =
-      filters.credentialUser === "all" ||
-      String(credential.user?.id) === filters.credentialUser;
-    const byService =
-      filters.credentialService === "all" ||
-      String(credential.service?.id) === filters.credentialService;
-    return byUser && byService;
-  });
-  const credentialTotalPages = Math.max(1, Math.ceil(filteredCredentials.length / PAGE_SIZE));
-  const credentialStart = (credentialPage - 1) * PAGE_SIZE;
-  const pagedCredentials = filteredCredentials.slice(
-    credentialStart,
-    credentialStart + PAGE_SIZE
-  );
   const headCandidates = adminUsers.filter(
     (user) => isHeadRole(user.role) && !user.is_superuser && user.portal_login !== viewerLogin
   );
@@ -1033,17 +1215,26 @@ export default function App() {
     if (user.is_superuser) {
       return false;
     }
+    if (isHeadRole(user.role)) {
+      return false;
+    }
     if (isSuperuser) {
       return true;
     }
     return Number(user.department?.id || 0) === viewerDepartmentId;
   });
+  const departmentUsers = writableUsers.filter((user) =>
+    isSuperuser ? true : Number(user.department?.id || 0) === viewerDepartmentId
+  );
   const canWriteForUser = (user) => {
     if (isSuperuser) {
       return true;
     }
     return Number(user?.department?.id || 0) === viewerDepartmentId;
   };
+  const selfCredentials = adminCredentials.filter(
+    (credential) => Number(credential.user?.id || 0) === viewerUserId
+  );
   const canRevokeShare = (share) =>
     isSuperuser || Number(share.department?.id || 0) === viewerDepartmentId;
   const activeShares = adminShares.filter(
@@ -1052,14 +1243,8 @@ export default function App() {
       (!share.expires_at || new Date(share.expires_at).getTime() > Date.now())
   );
 
-  useEffect(() => {
-    if (credentialPage > credentialTotalPages) {
-      setCredentialPage(credentialTotalPages);
-    }
-  }, [credentialPage, credentialTotalPages]);
-
   return (
-    <div className="page">
+    <div className={`page ${currentView === "admin" ? "page-admin" : ""}`}>
       <div className="bg-orbs" aria-hidden="true">
         <span className="orb orb-one" />
         <span className="orb orb-two" />
@@ -1072,7 +1257,10 @@ export default function App() {
         viewerFullName={viewerFullName}
         roleLabel={roleLabel}
         canManage={canManage}
+        canOpenServicesTab={canOpenServicesTab}
+        showVaultTab={showVaultTab}
         currentView={currentView}
+        pendingRequestsCount={pendingReviewRequestsCount}
         onToggleView={(targetView) => setCurrentView(targetView)}
         onLogout={handleLogout}
       />
@@ -1096,7 +1284,7 @@ export default function App() {
           copied={copied}
           onCopyTemplate={handleCopyTemplate}
         />
-      ) : currentView === "vault" ? (
+      ) : currentView === "vault" && showVaultTab ? (
         <VaultPage
           serviceGroupsCount={sections.length}
           search={search}
@@ -1106,6 +1294,10 @@ export default function App() {
           serviceOptions={serviceOptions}
           filteredSections={filteredSections}
           onCopyField={handleCopyCredentialValue}
+          onDownloadCredentialSecret={handleDownloadCredentialSecret}
+        />
+      ) : currentView === "services" && canOpenServicesTab ? (
+        <ServicesPage
           requestableServices={requestableServices}
           accessRequestForm={accessRequestForm}
           onAccessRequestChange={handleAccessRequestChange}
@@ -1116,7 +1308,9 @@ export default function App() {
           ownRequestFilters={ownRequestFilters}
           ownRequestServiceOptions={ownRequestServiceOptions}
           onOwnRequestFilterChange={handleOwnRequestFilterChange}
-          onExportOwnRequestsCsv={() => exportAccessRequestsCsv(ownFilteredAccessRequests, "my_access_requests")}
+          onExportOwnRequestsCsv={() =>
+            exportAccessRequestsCsv(ownFilteredAccessRequests, "my_access_requests")
+          }
           onCancelAccessRequest={handleCancelAccessRequest}
         />
       ) : null}
@@ -1148,11 +1342,12 @@ export default function App() {
           filters={filters}
           onFilterChange={handleFilterChange}
           canWriteForUser={canWriteForUser}
+          isDepartmentHead={isDepartmentHead}
           credentialForm={credentialForm}
           onCredentialChange={handleCredentialChange}
+          onCredentialFileChange={handleCredentialFileChange}
           credentialStatus={credentialStatus}
           onCreateCredential={handleCreateCredential}
-          pagedCredentials={pagedCredentials}
           editCredentialId={editCredentialId}
           editCredentialForm={editCredentialForm}
           onEditCredentialChange={handleEditCredentialChange}
@@ -1161,11 +1356,10 @@ export default function App() {
           onStartEditCredential={handleStartEditCredential}
           onToggleCredential={handleToggleCredential}
           onDeleteCredential={handleDeleteCredential}
+          onDownloadCredentialSecret={handleDownloadCredentialSecret}
           credentialPage={credentialPage}
-          credentialTotalPages={credentialTotalPages}
           setCredentialPage={setCredentialPage}
-          adminUsers={adminUsers}
-          isHeadRole={isHeadRole}
+          adminUsers={departmentUsers}
           accessRequests={filteredReviewableAccessRequests}
           accessRequestsTotal={reviewableAccessRequests.length}
           accessRequestStatus={accessRequestStatus}
@@ -1180,6 +1374,7 @@ export default function App() {
             exportAccessRequestsCsv(filteredReviewableAccessRequests, "department_access_requests")
           }
           adminCredentials={adminCredentials}
+          selfCredentials={selfCredentials}
         />
       )}
 

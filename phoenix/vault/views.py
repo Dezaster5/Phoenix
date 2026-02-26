@@ -4,11 +4,13 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.db import connection
 from django.db.models import Max, Q
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -101,6 +103,7 @@ def _head_visible_department_ids(user):
 
 def _build_auth_payload(user, token_key):
     return {
+        "id": user.id,
         "token": token_key,
         "portal_login": user.portal_login,
         "role": user.role,
@@ -123,6 +126,13 @@ def _record_credential_version(credential, changed_by=None, change_type=Credenti
         credential=credential,
         version=max_version + 1,
         login=credential.login,
+        secret_type=credential.secret_type,
+        secret_filename=credential.secret_filename,
+        ssh_host=credential.ssh_host,
+        ssh_port=credential.ssh_port,
+        ssh_algorithm=credential.ssh_algorithm,
+        ssh_public_key=credential.ssh_public_key,
+        ssh_fingerprint=credential.ssh_fingerprint,
         password=credential.password,
         notes=credential.notes,
         is_active=credential.is_active,
@@ -265,10 +275,22 @@ class UserViewSet(viewsets.ModelViewSet):
         if _is_superuser(user):
             return User.objects.select_related("department")
         if _is_department_head(user):
-            visible_department_ids = _head_visible_department_ids(user)
-            return User.objects.select_related("department").filter(
-                Q(department_id__in=visible_department_ids) | Q(role__in=[User.Role.HEAD, "admin"])
-            ).distinct()
+            return (
+                User.objects.select_related("department")
+                .filter(
+                    Q(
+                        department_id=user.department_id,
+                        role=User.Role.EMPLOYEE,
+                    )
+                    | Q(
+                        role=User.Role.HEAD,
+                        is_superuser=False,
+                        is_active=True,
+                    )
+                )
+                .exclude(id=user.id)
+                .distinct()
+            )
         return User.objects.none()
 
     def list(self, request, *args, **kwargs):
@@ -408,6 +430,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
 class CredentialViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
         user = self.request.user
@@ -531,6 +554,34 @@ class CredentialViewSet(viewsets.ModelViewSet):
             object_type="Credential",
             object_id="list",
             metadata={"count": count},
+            request=request,
+        )
+        return response
+
+    @action(detail=True, methods=["get"], permission_classes=[IsAuthenticated], url_path="download-secret")
+    def download_secret(self, request, pk=None):
+        credential = self.get_object()
+        if credential.secret_type != Credential.SecretType.SSH_KEY:
+            return Response(
+                {"detail": "Скачивание доступно только для SSH ключей."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        safe_filename = "".join(
+            char if char.isalnum() or char in ("-", "_", ".") else "_" for char in credential.secret_filename
+        ).strip("._")
+        if not safe_filename:
+            safe_filename = f"ssh_key_{credential.id}.key"
+
+        response = HttpResponse(credential.password or "", content_type="application/x-pem-file")
+        response["Content-Disposition"] = f'attachment; filename="{safe_filename}"'
+
+        log_action(
+            actor=request.user,
+            action=AuditLog.Action.VIEW,
+            object_type="Credential",
+            object_id=str(credential.id),
+            metadata={"download": "ssh_private_key", "filename": safe_filename},
             request=request,
         )
         return response
@@ -715,6 +766,8 @@ class AccessRequestViewSet(viewsets.ModelViewSet):
         requester = self.request.user
         if not requester.is_active:
             raise ValidationError("Inactive users cannot create access requests.")
+        if _is_department_head(requester) or _is_superuser(requester):
+            raise ValidationError("Department heads and superusers should assign access directly.")
         access_request = serializer.save(requester=requester)
         log_action(self.request.user, AuditLog.Action.CREATE, access_request, request=self.request)
 

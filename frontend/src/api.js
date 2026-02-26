@@ -40,13 +40,18 @@ async function apiGet(path, token) {
 }
 
 async function apiWrite(path, token, method, payload, fallbackMessage) {
+  const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
+  const headers = {
+    Authorization: `Token ${token}`
+  };
+  if (!isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Token ${token}`
-    },
-    body: payload ? JSON.stringify(payload) : undefined
+    headers,
+    body: payload ? (isFormData ? payload : JSON.stringify(payload)) : undefined
   });
 
   if (!response.ok) {
@@ -111,15 +116,61 @@ export async function apiDeleteAccess(token, id) {
 }
 
 export async function apiCreateCredential(token, payload) {
-  return apiWrite("/credentials/", token, "POST", payload, "Ошибка создания кредов");
+  const formData = new FormData();
+  Object.entries(payload || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    formData.append(key, value);
+  });
+  return apiWrite("/credentials/", token, "POST", formData, "Ошибка создания кредов");
 }
 
 export async function apiUpdateCredential(token, id, payload) {
-  return apiWrite(`/credentials/${id}/`, token, "PATCH", payload, "Ошибка обновления кредов");
+  const hasFile =
+    payload &&
+    typeof File !== "undefined" &&
+    Object.values(payload).some((value) => value instanceof File);
+  if (!hasFile) {
+    return apiWrite(`/credentials/${id}/`, token, "PATCH", payload, "Ошибка обновления кредов");
+  }
+  const formData = new FormData();
+  Object.entries(payload || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    formData.append(key, value);
+  });
+  return apiWrite(`/credentials/${id}/`, token, "PATCH", formData, "Ошибка обновления кредов");
 }
 
 export async function apiDeleteCredential(token, id) {
   return apiWrite(`/credentials/${id}/`, token, "DELETE", null, "Ошибка удаления кредов");
+}
+
+export async function apiDownloadCredentialSecret(token, id) {
+  const response = await fetch(`${API_BASE}/credentials/${id}/download-secret/`, {
+    method: "GET",
+    headers: {
+      Authorization: `Token ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: "Ошибка скачивания секрета" }));
+    const message = typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
+    throw new Error(message || "Ошибка скачивания секрета");
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  const filename = match?.[1] || `ssh_key_${id}.key`;
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
 }
 
 export async function apiFetchDepartmentShares(token) {

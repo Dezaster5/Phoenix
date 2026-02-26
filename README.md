@@ -60,6 +60,12 @@ npm install
 npm run dev
 ```
 
+If Vite reports `http proxy error` with `ECONNREFUSED`, ensure backend is running on `:8000`.
+For custom dev environments (for example WSL/Windows networking), set `frontend/.env`:
+```env
+VITE_PROXY_TARGET=http://127.0.0.1:8000
+```
+
 ## Important Endpoints
 - API root: `http://localhost:8000/api/`
 - Schema: `http://localhost:8000/api/schema/`

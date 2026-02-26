@@ -143,9 +143,30 @@ class ServiceAccess(models.Model):
 
 
 class Credential(models.Model):
+    class SecretType(models.TextChoices):
+        PASSWORD = "password", "Password"
+        SSH_KEY = "ssh_key", "SSH Key"
+        API_TOKEN = "api_token", "API Token"
+
+    class SSHAlgorithm(models.TextChoices):
+        ED25519 = "ed25519", "Ed25519"
+        RSA = "rsa", "RSA"
+        ECDSA = "ecdsa", "ECDSA"
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="credentials")
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="credentials")
     login = models.CharField(max_length=255)
+    secret_type = models.CharField(
+        max_length=32,
+        choices=SecretType.choices,
+        default=SecretType.PASSWORD,
+    )
+    secret_filename = models.CharField(max_length=255, blank=True, default="")
+    ssh_host = models.CharField(max_length=255, blank=True, default="")
+    ssh_port = models.PositiveIntegerField(default=22)
+    ssh_algorithm = models.CharField(max_length=16, choices=SSHAlgorithm.choices, blank=True, default="")
+    ssh_public_key = models.TextField(blank=True, default="")
+    ssh_fingerprint = models.CharField(max_length=128, blank=True, default="")
     password = EncryptedTextField()
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -285,6 +306,17 @@ class CredentialVersion(models.Model):
     )
     version = models.PositiveIntegerField()
     login = models.CharField(max_length=255)
+    secret_type = models.CharField(
+        max_length=32,
+        choices=Credential.SecretType.choices,
+        default=Credential.SecretType.PASSWORD,
+    )
+    secret_filename = models.CharField(max_length=255, blank=True, default="")
+    ssh_host = models.CharField(max_length=255, blank=True, default="")
+    ssh_port = models.PositiveIntegerField(default=22)
+    ssh_algorithm = models.CharField(max_length=16, choices=Credential.SSHAlgorithm.choices, blank=True, default="")
+    ssh_public_key = models.TextField(blank=True, default="")
+    ssh_fingerprint = models.CharField(max_length=128, blank=True, default="")
     password = EncryptedTextField()
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)

@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 
 const PASSWORD_VISIBLE_MS = 10000;
+const PAGE_SIZE = 6;
+
+const getSecretLabel = (secretType) => {
+  if (secretType === "ssh_key") return "SSH ключ";
+  if (secretType === "api_token") return "API токен";
+  return "Пароль";
+};
+
+const getSecretPreview = (value) => {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "—";
+  if (normalized.length <= 28) return normalized;
+  return `${normalized.slice(0, 28)}…`;
+};
 
 export default function VaultPage({
   serviceGroupsCount,
@@ -11,21 +25,13 @@ export default function VaultPage({
   serviceOptions,
   filteredSections,
   onCopyField,
-  requestableServices,
-  accessRequestForm,
-  onAccessRequestChange,
-  onCreateAccessRequest,
-  accessRequestStatus,
-  ownAccessRequests,
-  ownAccessRequestsTotal,
-  ownRequestFilters,
-  ownRequestServiceOptions,
-  onOwnRequestFilterChange,
-  onExportOwnRequestsCsv,
-  onCancelAccessRequest
+  onDownloadCredentialSecret
 }) {
   const [nowTs, setNowTs] = useState(Date.now());
   const [passwordVisibleUntil, setPasswordVisibleUntil] = useState({});
+  const [detailsCredential, setDetailsCredential] = useState(null);
+  const [openMenu, setOpenMenu] = useState(null);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const timer = setInterval(() => setNowTs(Date.now()), 1000);
@@ -44,27 +50,39 @@ export default function VaultPage({
     [filteredSections]
   );
 
-  const requestStatusLabel = {
-    pending: "ожидает",
-    approved: "одобрен",
-    rejected: "отклонен",
-    canceled: "отменен"
-  };
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const pagedRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const showPasswordForTenSeconds = (rowId) => {
-    setPasswordVisibleUntil((prev) => ({ ...prev, [rowId]: Date.now() + PASSWORD_VISIBLE_MS }));
-  };
+  useEffect(() => {
+    setPage(1);
+  }, [search, serviceFilter, rows.length]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    const closeMenu = () => setOpenMenu(null);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("click", closeMenu);
+    return () => {
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("click", closeMenu);
+    };
+  }, []);
 
   const isPasswordVisible = (rowId) => Number(passwordVisibleUntil[rowId] || 0) > nowTs;
-  const remainingSeconds = (rowId) =>
-    Math.max(0, Math.ceil((Number(passwordVisibleUntil[rowId] || 0) - nowTs) / 1000));
 
-  const handleCopyPassword = (row) => {
-    if (!isPasswordVisible(row.id)) {
-      window.alert("Сначала нажмите «Показать на 10 сек».");
-      return;
-    }
-    onCopyField?.(row.password, "Пароль");
+  const togglePasswordVisibility = (rowId) => {
+    const currentTs = Date.now();
+    setPasswordVisibleUntil((prev) => {
+      const visible = Number(prev[rowId] || 0) > currentTs;
+      return { ...prev, [rowId]: visible ? 0 : currentTs + PASSWORD_VISIBLE_MS };
+    });
   };
 
   return (
@@ -72,8 +90,8 @@ export default function VaultPage({
       <div className="panel">
         <div className="panel-header">
           <div>
-            <h2>Vault</h2>
-            <p>Мои доступы: сервисов {serviceGroupsCount}, учетных записей {rows.length}</p>
+            <h2>Мои доступы</h2>
+            <p>Сервисов: {serviceGroupsCount}, учетных записей: {rows.length}</p>
           </div>
         </div>
 
@@ -95,24 +113,20 @@ export default function VaultPage({
         </div>
 
         {rows.length === 0 ? (
-          <div className="empty-state">
-            Нет доступов. Запросите сервис у руководителя.
-          </div>
+          <div className="empty-state">Нет доступов. Перейдите во вкладку «Все сервисы», чтобы запросить доступ.</div>
         ) : (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table table-credentials">
               <thead>
                 <tr>
                   <th>Сервис</th>
-                  <th>Пользователь</th>
                   <th>Логин</th>
-                  <th>Пароль</th>
-                  <th>Примечание</th>
+                  <th>Пароль / Ключ</th>
                   <th>Действия</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {pagedRows.map((row) => (
                   <tr key={row.id}>
                     <td>
                       <div>{row.sectionName}</div>
@@ -122,163 +136,76 @@ export default function VaultPage({
                         </a>
                       )}
                     </td>
-                    <td>{row.owner_name || row.owner_login || "Сотрудник"}</td>
-                    <td>{row.login}</td>
                     <td>
-                      {isPasswordVisible(row.id) ? row.password : "••••••••"}
+                      {row.secret_type === "ssh_key" || row.secret_type === "api_token" ? (
+                        "—"
+                      ) : (
+                        <button
+                          className="cell-link"
+                          type="button"
+                          onClick={() => onCopyField?.(row.login, "Логин")}
+                          title="Нажмите, чтобы скопировать логин"
+                        >
+                          {row.login}
+                        </button>
+                      )}
                     </td>
-                    <td>{row.notes || "—"}</td>
                     <td>
-                      <div className="row-actions">
-                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => onCopyField?.(row.login, "Логин")}>
-                          Копировать логин
+                      <div className="password-cell">
+                        <button
+                          className="icon-button"
+                          type="button"
+                          onClick={() => togglePasswordVisibility(row.id)}
+                          aria-label={isPasswordVisible(row.id) ? "Скрыть секрет" : "Показать секрет"}
+                          title={isPasswordVisible(row.id) ? "Скрыть секрет" : "Показать секрет"}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path
+                              d="M12 5C6 5 2.2 9.4 1 12c1.2 2.6 5 7 11 7s9.8-4.4 11-7c-1.2-2.6-5-7-11-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"
+                              fill="currentColor"
+                            />
+                          </svg>
                         </button>
-                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => showPasswordForTenSeconds(row.id)}>
-                          Показать на 10 сек
-                        </button>
-                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => handleCopyPassword(row)}>
-                          Копировать пароль
-                        </button>
-                        {isPasswordVisible(row.id) && (
-                          <span className="hint">Скрытие через {remainingSeconds(row.id)}с</span>
+                        {isPasswordVisible(row.id) ? (
+                          <button
+                            className="cell-link secret-preview"
+                            type="button"
+                            onClick={() => onCopyField?.(row.password, "Секрет")}
+                            title="Нажмите, чтобы скопировать"
+                          >
+                            {getSecretPreview(row.password)}
+                          </button>
+                        ) : (
+                          <span>••••••••</span>
                         )}
                       </div>
                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Запрос доступа</h2>
-            <p>Выберите сервис из списка и отправьте запрос руководителю.</p>
-          </div>
-        </div>
-
-        <form className="toolbar-row form-inline" onSubmit={onCreateAccessRequest}>
-          <select value={accessRequestForm.service_id} onChange={onAccessRequestChange("service_id")}>
-            <option value="">Выберите сервис</option>
-            {requestableServices.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name}
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
-            placeholder="Причина"
-            value={accessRequestForm.justification}
-            onChange={onAccessRequestChange("justification")}
-          />
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={accessRequestStatus.loading || !accessRequestForm.service_id}
-          >
-            {accessRequestStatus.loading ? "Отправка..." : "Отправить"}
-          </button>
-        </form>
-
-        <details className="help-list">
-          <summary>Список доступных сервисов ({requestableServices.length})</summary>
-          <ul>
-            {requestableServices.map((service) => (
-              <li key={service.id}>
-                <span>{service.name}</span>
-                {service.url && (
-                  <a href={service.url} target="_blank" rel="noreferrer">
-                    Открыть
-                  </a>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
-
-        {accessRequestStatus.error && <div className="inline-error">{accessRequestStatus.error}</div>}
-        {accessRequestStatus.success && <div className="inline-success">{accessRequestStatus.success}</div>}
-      </div>
-
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Мои заявки</h2>
-            <p>Отслеживание статусов запросов.</p>
-          </div>
-        </div>
-
-        <div className="toolbar-row">
-          <select value={ownRequestFilters.status} onChange={onOwnRequestFilterChange("status")}>
-            <option value="all">Все статусы</option>
-            <option value="pending">Ожидает</option>
-            <option value="approved">Одобрен</option>
-            <option value="rejected">Отклонен</option>
-            <option value="canceled">Отменен</option>
-          </select>
-          <select value={ownRequestFilters.service} onChange={onOwnRequestFilterChange("service")}>
-            <option value="all">Все сервисы</option>
-            {ownRequestServiceOptions.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name}
-              </option>
-            ))}
-          </select>
-          <input
-            type="search"
-            placeholder="Поиск"
-            value={ownRequestFilters.query}
-            onChange={onOwnRequestFilterChange("query")}
-          />
-          <button
-            className="btn btn-secondary btn-sm"
-            type="button"
-            onClick={onExportOwnRequestsCsv}
-            disabled={ownAccessRequests.length === 0}
-            title="Экспорт CSV"
-          >
-            CSV
-          </button>
-        </div>
-
-        {ownAccessRequests.length === 0 ? (
-          <div className="empty-state">Нет заявок. Выберите сервис и отправьте первый запрос.</div>
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Сервис</th>
-                  <th>Комментарий</th>
-                  <th>Дата</th>
-                  <th>Статус</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ownAccessRequests.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.service?.name || "Сервис"}</td>
-                    <td>{item.justification || "—"}</td>
-                    <td>{item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "—"}</td>
-                    <td>{requestStatusLabel[item.status] || item.status}</td>
                     <td>
-                      {item.status === "pending" ? (
-                        <button
-                          className="btn btn-danger btn-sm"
-                          type="button"
-                          onClick={() => onCancelAccessRequest(item.id)}
-                          disabled={accessRequestStatus.loading}
-                        >
-                          Отменить
-                        </button>
-                      ) : (
-                        "—"
-                      )}
+                      <button
+                        className="icon-button"
+                        type="button"
+                        title="Действия"
+                        aria-label="Действия"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setOpenMenu((prev) =>
+                            prev?.id === row.id
+                              ? null
+                              : {
+                                  id: row.id,
+                                  row,
+                                  top: rect.bottom + 6,
+                                  left: Math.min(
+                                    rect.right - 180,
+                                    window.innerWidth - 188
+                                  )
+                                }
+                          );
+                        }}
+                      >
+                        ⋯
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -286,8 +213,92 @@ export default function VaultPage({
             </table>
           </div>
         )}
-        <div className="hint">Показано {ownAccessRequests.length} из {ownAccessRequestsTotal}</div>
+
+        {rows.length > PAGE_SIZE && (
+          <div className="pagination-row">
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              disabled={page === 1}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            >
+              Назад
+            </button>
+            <span>
+              {page} / {totalPages}
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              disabled={page === totalPages}
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            >
+              Вперед
+            </button>
+          </div>
+        )}
       </div>
+
+      {openMenu && (
+        <div
+          className="floating-menu"
+          style={{
+            top: `${Math.max(8, openMenu.top)}px`,
+            left: `${Math.max(8, openMenu.left)}px`
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {openMenu.row.secret_type === "ssh_key" && (
+            <button
+              type="button"
+              onClick={() => {
+                onDownloadCredentialSecret?.(openMenu.row.id);
+                setOpenMenu(null);
+              }}
+            >
+              Скачать ключ
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setDetailsCredential(openMenu.row);
+              setOpenMenu(null);
+            }}
+          >
+            Подробнее
+          </button>
+        </div>
+      )}
+
+      {detailsCredential && (
+        <div className="modal-backdrop" onClick={() => setDetailsCredential(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Подробнее о доступе</h3>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setDetailsCredential(null)}>
+                Закрыть
+              </button>
+            </div>
+            <div className="detail-list">
+              <div><strong>Сервис:</strong> {detailsCredential.sectionName}</div>
+              <div><strong>Тип:</strong> {getSecretLabel(detailsCredential.secret_type)}</div>
+              <div><strong>Логин владельца:</strong> {detailsCredential.owner_login || "—"}</div>
+              <div><strong>Сотрудник:</strong> {detailsCredential.owner_name || "—"}</div>
+              <div><strong>Отдел:</strong> {detailsCredential.owner_department || "—"}</div>
+              {detailsCredential.secret_type === "ssh_key" && (
+                <>
+                  <div><strong>SSH host:</strong> {detailsCredential.ssh_host || "—"}</div>
+                  <div><strong>SSH port:</strong> {detailsCredential.ssh_port || "—"}</div>
+                  <div><strong>Алгоритм:</strong> {(detailsCredential.ssh_algorithm || "—").toUpperCase()}</div>
+                  <div><strong>Fingerprint:</strong> {detailsCredential.ssh_fingerprint || "—"}</div>
+                </>
+              )}
+              <div><strong>Примечание:</strong> {detailsCredential.notes || "—"}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

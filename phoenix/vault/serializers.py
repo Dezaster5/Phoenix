@@ -161,6 +161,13 @@ class CredentialReadSerializer(serializers.ModelSerializer):
             "user",
             "service",
             "login",
+            "secret_type",
+            "secret_filename",
+            "ssh_host",
+            "ssh_port",
+            "ssh_algorithm",
+            "ssh_public_key",
+            "ssh_fingerprint",
             "password",
             "notes",
             "is_active",
@@ -177,9 +184,111 @@ class CredentialReadSerializer(serializers.ModelSerializer):
 
 
 class CredentialWriteSerializer(serializers.ModelSerializer):
+    login = serializers.CharField(required=False, allow_blank=True)
+    secret_file = serializers.FileField(write_only=True, required=False, allow_null=True)
+
     class Meta:
         model = Credential
-        fields = ("id", "user", "service", "login", "password", "notes", "is_active")
+        fields = (
+            "id",
+            "user",
+            "service",
+            "login",
+            "secret_type",
+            "secret_filename",
+            "ssh_host",
+            "ssh_port",
+            "ssh_algorithm",
+            "ssh_public_key",
+            "ssh_fingerprint",
+            "password",
+            "notes",
+            "is_active",
+            "secret_file",
+        )
+
+    def validate(self, attrs):
+        instance = getattr(self, "instance", None)
+        secret_file = attrs.pop("secret_file", None)
+        secret_type = attrs.get(
+            "secret_type",
+            getattr(instance, "secret_type", Credential.SecretType.PASSWORD),
+        )
+        login_value = str(attrs.get("login", getattr(instance, "login", "")) or "").strip()
+
+        if secret_file is not None:
+            raw_bytes = secret_file.read()
+            try:
+                decoded_secret = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                raise serializers.ValidationError(
+                    {"secret_file": "Файл секрета должен быть в UTF-8 формате."}
+                )
+            attrs["password"] = decoded_secret
+            if not attrs.get("secret_filename"):
+                attrs["secret_filename"] = secret_file.name[:255]
+
+        secret_value = attrs.get("password", getattr(instance, "password", ""))
+        if not secret_value:
+            raise serializers.ValidationError({"password": "Секрет обязателен."})
+
+        if secret_type == Credential.SecretType.SSH_KEY:
+            attrs["login"] = "ssh-key"
+            ssh_host = str(attrs.get("ssh_host", getattr(instance, "ssh_host", "")) or "").strip()
+            ssh_port = attrs.get("ssh_port", getattr(instance, "ssh_port", 22))
+            ssh_algorithm = attrs.get(
+                "ssh_algorithm",
+                getattr(instance, "ssh_algorithm", ""),
+            ) or Credential.SSHAlgorithm.ED25519
+            secret_filename = attrs.get(
+                "secret_filename",
+                getattr(instance, "secret_filename", ""),
+            )
+
+            if not ssh_host:
+                raise serializers.ValidationError({"ssh_host": "Для SSH укажите хост."})
+            try:
+                ssh_port_int = int(ssh_port)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError({"ssh_port": "Порт SSH должен быть числом."})
+            if not (1 <= ssh_port_int <= 65535):
+                raise serializers.ValidationError({"ssh_port": "Порт SSH должен быть от 1 до 65535."})
+            if ssh_algorithm not in Credential.SSHAlgorithm.values:
+                raise serializers.ValidationError(
+                    {"ssh_algorithm": "Выберите поддерживаемый SSH алгоритм."}
+                )
+            if "PRIVATE KEY" not in str(secret_value):
+                raise serializers.ValidationError(
+                    {"password": "Секрет SSH должен содержать приватный ключ."}
+                )
+            if not secret_filename:
+                attrs["secret_filename"] = f"id_{ssh_algorithm}.key"
+            attrs["ssh_host"] = ssh_host
+            attrs["ssh_port"] = ssh_port_int
+            attrs["ssh_algorithm"] = ssh_algorithm
+            return attrs
+
+        if secret_type == Credential.SecretType.API_TOKEN:
+            attrs["login"] = "api-token"
+            attrs["secret_filename"] = ""
+            attrs["ssh_host"] = ""
+            attrs["ssh_port"] = 22
+            attrs["ssh_algorithm"] = ""
+            attrs["ssh_public_key"] = ""
+            attrs["ssh_fingerprint"] = ""
+            return attrs
+
+        if not login_value:
+            raise serializers.ValidationError({"login": "Логин обязателен для типа 'пароль'."})
+        attrs["login"] = login_value
+
+        attrs["secret_filename"] = ""
+        attrs["ssh_host"] = ""
+        attrs["ssh_port"] = 22
+        attrs["ssh_algorithm"] = ""
+        attrs["ssh_public_key"] = ""
+        attrs["ssh_fingerprint"] = ""
+        return attrs
 
 
 class ServiceAccessSerializer(serializers.ModelSerializer):
@@ -379,6 +488,13 @@ class CredentialVersionSerializer(serializers.ModelSerializer):
             "id",
             "version",
             "login",
+            "secret_type",
+            "secret_filename",
+            "ssh_host",
+            "ssh_port",
+            "ssh_algorithm",
+            "ssh_public_key",
+            "ssh_fingerprint",
             "password",
             "notes",
             "is_active",
