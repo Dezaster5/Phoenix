@@ -13,3 +13,5 @@ phoenix/keys/
 *.pyd
 *.sqlite3
 backups/
+
+.env.for_render
