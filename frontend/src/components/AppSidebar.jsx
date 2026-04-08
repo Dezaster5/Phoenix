@@ -1,15 +1,15 @@
+import { NavLink } from "react-router-dom";
+
 export default function AppSidebar({
   viewerFullName,
   viewerDepartment,
   roleLabel,
-  currentView,
   canOpenServicesTab,
-  showVaultTab,
-  onToggleView
+  showVaultTab
 }) {
   const navItems = [
-    showVaultTab ? { id: "vault", label: "Мои доступы" } : null,
-    canOpenServicesTab ? { id: "services", label: "Заявки" } : null
+    showVaultTab ? { id: "vault", label: "Мои доступы", to: "/vault" } : null,
+    canOpenServicesTab ? { id: "services", label: "Заявки", to: "/services" } : null
   ].filter(Boolean);
 
   return (
@@ -26,14 +26,13 @@ export default function AppSidebar({
           <h2>Разделы</h2>
           <nav>
             {navItems.map((item) => (
-              <button
+              <NavLink
                 key={item.id}
-                type="button"
-                className={`sidebar-link ${currentView === item.id ? "is-active" : ""}`}
-                onClick={() => onToggleView(item.id)}
+                to={item.to}
+                className={({ isActive }) => `sidebar-link ${isActive ? "is-active" : ""}`}
               >
                 <span>{item.label}</span>
-              </button>
+              </NavLink>
             ))}
           </nav>
         </section>
