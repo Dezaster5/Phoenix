@@ -25,6 +25,14 @@ const requestStatusLabel = {
   canceled: "Отменен"
 };
 
+const auditActionLabel = {
+  create: "Создание",
+  update: "Изменение",
+  disable: "Отключение",
+  view: "Просмотр",
+  login: "Вход"
+};
+
 const getRequestBadgeClass = (status) => {
   if (status === "approved") return "status-badge status-approved";
   if (status === "rejected") return "status-badge status-rejected";
@@ -105,6 +113,14 @@ export default function AdminPanel({
   reviewRequestServiceOptions,
   onReviewRequestFilterChange,
   onExportAccessRequestsCsv,
+  auditLogs,
+  auditStatus,
+  auditFilters,
+  auditActorOptions,
+  auditActionOptions,
+  auditObjectTypeOptions,
+  onAuditFilterChange,
+  onExportAuditLogs,
   adminCredentials,
   selfCredentials
 }) {
@@ -169,7 +185,8 @@ export default function AdminPanel({
   const tabs = [
     { id: "department", label: "Мой отдел" },
     { id: "shares", label: "Доступ отдела" },
-    { id: "requests", label: "Заявки", badge: pendingRequestsCount }
+    { id: "requests", label: "Заявки", badge: pendingRequestsCount },
+    { id: "audit", label: "Аудит" }
   ];
 
   useEffect(() => {
@@ -940,6 +957,98 @@ export default function AdminPanel({
             <div className="hint">
               Показано {accessRequests.length} из {accessRequestsTotal}
             </div>
+          </section>
+        )}
+
+        {adminTab === "audit" && (
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>Аудит</h2>
+                <p>Журнал действий по доступам, секретам и входам.</p>
+              </div>
+            </div>
+
+            {auditStatus.error && <div className="inline-error">{auditStatus.error}</div>}
+
+            <div className="toolbar-row">
+              <select value={auditFilters.actor} onChange={onAuditFilterChange("actor")}>
+                <option value="">Все пользователи</option>
+                {auditActorOptions.map((actorLogin) => (
+                  <option key={actorLogin} value={actorLogin}>
+                    {actorLogin}
+                  </option>
+                ))}
+              </select>
+              <select value={auditFilters.action} onChange={onAuditFilterChange("action")}>
+                <option value="all">Все действия</option>
+                {auditActionOptions.map((action) => (
+                  <option key={action} value={action}>
+                    {auditActionLabel[action] || action}
+                  </option>
+                ))}
+              </select>
+              <select value={auditFilters.object_type} onChange={onAuditFilterChange("object_type")}>
+                <option value="all">Все объекты</option>
+                {auditObjectTypeOptions.map((objectType) => (
+                  <option key={objectType} value={objectType}>
+                    {objectType}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="date"
+                value={auditFilters.date_from}
+                onChange={onAuditFilterChange("date_from")}
+              />
+              <input
+                type="date"
+                value={auditFilters.date_to}
+                onChange={onAuditFilterChange("date_to")}
+              />
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                onClick={onExportAuditLogs}
+                disabled={auditLogs.length === 0}
+                title="Экспорт CSV"
+              >
+                CSV
+              </button>
+            </div>
+
+            {auditStatus.loading ? (
+              <div className="empty-state">Загружаем журнал действий…</div>
+            ) : auditLogs.length === 0 ? (
+              <div className="empty-state">Нет записей аудита по текущим фильтрам.</div>
+            ) : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Дата</th>
+                      <th>Кто</th>
+                      <th>Действие</th>
+                      <th>Объект</th>
+                      <th>ID</th>
+                      <th>IP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLogs.map((item) => (
+                      <tr key={item.id}>
+                        <td>{formatDateTime(item.created_at)}</td>
+                        <td>{item.actor?.portal_login || "—"}</td>
+                        <td>{auditActionLabel[item.action] || item.action}</td>
+                        <td>{item.object_type || "—"}</td>
+                        <td>{item.object_id || "—"}</td>
+                        <td>{item.ip_address || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         )}
 

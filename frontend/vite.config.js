@@ -15,6 +15,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true
         }
       }
+    },
+    test: {
+      environment: "jsdom",
+      globals: true,
+      setupFiles: "./src/test/setupTests.js",
+      css: true
     }
   };
 });

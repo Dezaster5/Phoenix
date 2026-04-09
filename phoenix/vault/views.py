@@ -6,6 +6,7 @@ from django.db import connection
 from django.db.models import Max, Q
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
@@ -117,6 +118,23 @@ def _build_auth_payload(user, token_key):
     }
 
 
+def _resolve_portal_login_user(portal_login):
+    return (
+        User.objects.select_related("department")
+        .filter(portal_login=portal_login, is_active=True)
+        .first()
+    )
+
+
+def _direct_passwordless_allowed(user):
+    if not user or not getattr(settings, "ALLOW_PASSWORDLESS_LOGIN", False):
+        return False
+    if user.is_superuser:
+        return False
+    allowed_roles = getattr(settings, "PASSWORDLESS_ROLES", ["employee"])
+    return user.role in allowed_roles
+
+
 def _record_credential_version(credential, changed_by=None, change_type=CredentialVersion.ChangeType.UPDATE):
     max_version = (
         CredentialVersion.objects.filter(credential=credential).aggregate(max_v=Max("version"))["max_v"]
@@ -149,6 +167,27 @@ def _reviewer_emails_for_request(access_request):
     return [u.email for u in reviewers if u.email]
 
 
+def _parse_range_bound(value, is_end=False):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    dt_value = parse_datetime(raw)
+    if dt_value is not None:
+        if timezone.is_naive(dt_value):
+            return timezone.make_aware(dt_value, timezone.get_current_timezone())
+        return dt_value
+
+    date_value = parse_date(raw)
+    if date_value is None:
+        return None
+
+    if is_end:
+        dt_value = timezone.datetime.combine(date_value, timezone.datetime.max.time()).replace(microsecond=0)
+    else:
+        dt_value = timezone.datetime.combine(date_value, timezone.datetime.min.time())
+    return timezone.make_aware(dt_value, timezone.get_current_timezone())
+
+
 class PortalLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -163,17 +202,26 @@ class PortalLoginView(APIView):
         if not portal_login:
             return Response({"detail": "portal_login is required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        challenge_enabled = False
         if password:
             user = authenticate(request, username=portal_login, password=password)
         else:
-            user = authenticate(request, portal_login=portal_login)
+            user = _resolve_portal_login_user(portal_login)
+            if user is not None:
+                challenge_enabled = bool(getattr(settings, "LOGIN_CHALLENGE_ENABLED", False))
+                if not challenge_enabled and not _direct_passwordless_allowed(user):
+                    user = None
 
         if user is None:
             return Response({"detail": "invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
 
-        challenge_enabled = bool(getattr(settings, "LOGIN_CHALLENGE_ENABLED", False)) and not password
         if challenge_enabled:
             if not code and not magic_token:
+                if not user.email and not settings.DEBUG:
+                    return Response(
+                        {"detail": "Для входа по одноразовому коду у пользователя должна быть указана почта."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 challenge, one_time_code, one_time_token = generate_login_challenge(user, request=request)
                 frontend_base_url = getattr(settings, "FRONTEND_BASE_URL", "").strip().rstrip("/")
                 magic_link = ""
@@ -245,6 +293,22 @@ class HealthReadyView(APIView):
         except Exception:
             return Response({"status": "degraded", "database": "down"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({"status": "ok", "database": "up"})
+
+
+class PublicConfigView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response(
+            {
+                "product_name": "Phoenix Vault",
+                "support_email": getattr(settings, "PUBLIC_SUPPORT_EMAIL", ""),
+                "login_request_subject": getattr(settings, "PUBLIC_LOGIN_REQUEST_SUBJECT", ""),
+                "login_request_template": getattr(settings, "PUBLIC_LOGIN_REQUEST_TEMPLATE", ""),
+                "login_challenge_enabled": bool(getattr(settings, "LOGIN_CHALLENGE_ENABLED", False)),
+            }
+        )
 
 
 class MeView(APIView):
@@ -870,12 +934,58 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
     permission_classes = [IsAuthenticated]
 
+    def _apply_filters(self, qs):
+        actor = str(self.request.query_params.get("actor", "")).strip()
+        action = str(self.request.query_params.get("action", "")).strip()
+        object_type = str(self.request.query_params.get("object_type", "")).strip()
+        date_from = _parse_range_bound(self.request.query_params.get("date_from"))
+        date_to = _parse_range_bound(self.request.query_params.get("date_to"), is_end=True)
+
+        if actor:
+            qs = qs.filter(actor__portal_login__icontains=actor)
+        if action:
+            qs = qs.filter(action=action)
+        if object_type:
+            qs = qs.filter(object_type__iexact=object_type)
+        if date_from:
+            qs = qs.filter(created_at__gte=date_from)
+        if date_to:
+            qs = qs.filter(created_at__lte=date_to)
+        return qs
+
     def get_queryset(self):
         user = self.request.user
         qs = AuditLog.objects.select_related("actor", "actor__department")
         if _is_superuser(user):
-            return qs
+            return self._apply_filters(qs)
         if _is_department_head(user):
             visible_ids = _head_visible_department_ids(user)
-            return qs.filter(Q(actor=user) | Q(actor__department_id__in=visible_ids)).distinct()
-        return qs.filter(actor=user)
+            scoped = qs.filter(Q(actor=user) | Q(actor__department_id__in=visible_ids)).distinct()
+            return self._apply_filters(scoped)
+        return self._apply_filters(qs.filter(actor=user))
+
+    @action(detail=False, methods=["get"], permission_classes=[IsAuthenticated])
+    def export(self, request):
+        logs = self.get_queryset()
+        rows = [
+            ["created_at", "actor", "action", "object_type", "object_id", "ip_address", "user_agent"]
+        ]
+        for item in logs:
+            rows.append(
+                [
+                    item.created_at.isoformat(),
+                    item.actor.portal_login if item.actor else "",
+                    item.action,
+                    item.object_type,
+                    item.object_id,
+                    item.ip_address or "",
+                    item.user_agent or "",
+                ]
+            )
+
+        csv_body = "\n".join(
+            ",".join(f'"{str(value).replace(chr(34), chr(34) * 2)}"' for value in row) for row in rows
+        )
+        response = HttpResponse(f"\ufeff{csv_body}", content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="audit_log_export.csv"'
+        return response

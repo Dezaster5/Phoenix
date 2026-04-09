@@ -18,11 +18,8 @@ class PortalLoginBackend(BaseBackend):
         except User.DoesNotExist:
             return None
 
-        if user.is_superuser:
-            return user
-
         allowed_roles = getattr(settings, "PASSWORDLESS_ROLES", ["employee"])
-        if user.role not in allowed_roles:
+        if user.is_superuser or user.role not in allowed_roles:
             return None
 
         return user

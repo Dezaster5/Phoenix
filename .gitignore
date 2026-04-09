@@ -15,3 +15,6 @@ phoenix/keys/
 backups/
 
 .env.for_render
+scripts/.env.for_render
+
+.codex

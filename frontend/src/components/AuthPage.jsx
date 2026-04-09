@@ -50,14 +50,20 @@ export default function AuthPage({
         </button>
 
         <div className="auth-secondary-actions">
-          <a
-            className="btn btn-secondary btn-sm"
-            href={`mailto:${requestEmail}?subject=${encodeURIComponent(
-              requestSubject
-            )}&body=${encodeURIComponent(requestTemplate)}`}
-          >
-            Запросить логин
-          </a>
+          {requestEmail ? (
+            <a
+              className="btn btn-secondary btn-sm"
+              href={`mailto:${requestEmail}?subject=${encodeURIComponent(
+                requestSubject
+              )}&body=${encodeURIComponent(requestTemplate)}`}
+            >
+              Запросить логин
+            </a>
+          ) : (
+            <button className="btn btn-secondary btn-sm" type="button" disabled>
+              Контакт поддержки не настроен
+            </button>
+          )}
           <button className="btn btn-link btn-sm" type="button" onClick={onCopyTemplate}>
             {copied ? "Шаблон скопирован" : "Шаблон запроса"}
           </button>

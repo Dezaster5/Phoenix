@@ -12,13 +12,16 @@ import {
   apiDeleteUser,
   apiDownloadCredentialSecret,
   apiFetchAccessRequests,
+  apiFetchAuditLogs,
   apiFetchCredentials,
   apiFetchDepartmentShares,
   apiFetchDepartments,
   apiFetchMe,
+  apiFetchPublicConfig,
   apiFetchServices,
   apiFetchUsers,
   apiLogin,
+  apiExportAuditLogsCsv,
   apiRejectAccessRequest,
   apiUpdateCredential,
   apiUpdateUser
@@ -26,9 +29,12 @@ import {
 import { useAuth } from "../context/AuthContext.jsx";
 import { demoSections } from "../data/demo";
 
-const requestTemplate = `Здравствуйте!\n\nПрошу выдать логин для доступа в Phoenix Vault.\nФИО: ____\nОтдел: ____\nДолжность: ____\nКорпоративная почта: ____\nНужные сервисы: ____\n\nСпасибо!`;
-const requestEmail = "penxren20052110@gmail.com";
-const requestSubject = "Запрос логина Phoenix Vault";
+const DEFAULT_PUBLIC_CONFIG = {
+  support_email: "",
+  login_request_subject: "Запрос логина Phoenix Vault",
+  login_request_template:
+    "Здравствуйте!\n\nПрошу выдать логин для доступа в Phoenix Vault.\nФИО: ____\nОтдел: ____\nДолжность: ____\nКорпоративная почта: ____\nНужные сервисы: ____\n\nСпасибо!"
+};
 const ACCESS_REQUEST_STATUS_LABEL = {
   pending: "ожидает",
   approved: "одобрен",
@@ -153,6 +159,14 @@ const createReviewRequestFilters = () => ({
   query: ""
 });
 
+const createAuditFilters = () => ({
+  actor: "",
+  action: "all",
+  object_type: "all",
+  date_from: "",
+  date_to: ""
+});
+
 const createCredentialForm = () => ({
   user_id: "",
   service_id: "",
@@ -250,6 +264,7 @@ export default function usePhoenixAppState() {
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
   const [status, setStatus] = useState(createStatusState());
+  const [publicConfig, setPublicConfig] = useState(DEFAULT_PUBLIC_CONFIG);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminDepartments, setAdminDepartments] = useState([]);
   const [adminServices, setAdminServices] = useState([]);
@@ -263,7 +278,10 @@ export default function usePhoenixAppState() {
   const [accessRequestStatus, setAccessRequestStatus] = useState(createMessageState());
   const [ownRequestFilters, setOwnRequestFilters] = useState(createOwnRequestFilters());
   const [reviewRequestFilters, setReviewRequestFilters] = useState(createReviewRequestFilters());
+  const [auditFilters, setAuditFilters] = useState(createAuditFilters());
   const [reviewComments, setReviewComments] = useState({});
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditStatus, setAuditStatus] = useState(createMessageState());
   const [filters, setFilters] = useState({ credentialService: "all" });
   const [credentialPage, setCredentialPage] = useState(1);
   const [editCredentialId, setEditCredentialId] = useState(null);
@@ -286,7 +304,7 @@ export default function usePhoenixAppState() {
       : "Сотрудник";
 
   useEffect(() => {
-    const allowedTabs = new Set(["department", "shares", "requests", "self"]);
+    const allowedTabs = new Set(["department", "shares", "requests", "audit", "self"]);
     const isSharedDepartmentTab = String(adminTab).startsWith("shared:");
     if (!allowedTabs.has(adminTab) && !isSharedDepartmentTab) {
       setAdminTab("department");
@@ -300,6 +318,26 @@ export default function usePhoenixAppState() {
     }, 2200);
     return () => clearTimeout(timer);
   }, [toast.visible, toast.message]);
+
+  useEffect(() => {
+    const loadPublicConfig = async () => {
+      try {
+        const data = await apiFetchPublicConfig();
+        setPublicConfig({
+          support_email: data.support_email || "",
+          login_request_subject:
+            data.login_request_subject || DEFAULT_PUBLIC_CONFIG.login_request_subject,
+          login_request_template:
+            data.login_request_template || DEFAULT_PUBLIC_CONFIG.login_request_template
+        });
+      } catch {
+        setPublicConfig(DEFAULT_PUBLIC_CONFIG);
+      }
+    };
+
+    loadPublicConfig();
+    return undefined;
+  }, []);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -373,6 +411,28 @@ export default function usePhoenixAppState() {
     loadUsers();
     return undefined;
   }, [token, canManage]);
+
+  useEffect(() => {
+    if (!token || !canManage) {
+      setAuditLogs([]);
+      return undefined;
+    }
+
+    const loadAuditLogs = async () => {
+      try {
+        setAuditStatus({ loading: true, error: "", success: "" });
+        const response = await apiFetchAuditLogs(token, auditFilters);
+        setAuditLogs(Array.isArray(response) ? response : response.results || []);
+        setAuditStatus({ loading: false, error: "", success: "" });
+      } catch (err) {
+        setAuditLogs([]);
+        setAuditStatus({ loading: false, error: err.message || "Не удалось загрузить аудит.", success: "" });
+      }
+    };
+
+    loadAuditLogs();
+    return undefined;
+  }, [token, canManage, auditFilters]);
 
   useEffect(() => {
     setCredentialPage(1);
@@ -504,7 +564,7 @@ export default function usePhoenixAppState() {
 
   const handleCopyTemplate = async () => {
     try {
-      await navigator.clipboard.writeText(requestTemplate);
+      await navigator.clipboard.writeText(publicConfig.login_request_template);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -770,6 +830,10 @@ export default function usePhoenixAppState() {
 
   const handleReviewRequestFilterChange = (field) => (event) => {
     setReviewRequestFilters((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const handleAuditFilterChange = (field) => (event) => {
+    setAuditFilters((prev) => ({ ...prev, [field]: event.target.value }));
   };
 
   const handleApproveWithComment = async (requestId) => {
@@ -1096,6 +1160,32 @@ export default function usePhoenixAppState() {
     [reviewableAccessRequests, reviewRequestFilters]
   );
 
+  const auditActorOptions = useMemo(() => {
+    const unique = new Map();
+    auditLogs.forEach((item) => {
+      const login = item.actor?.portal_login;
+      if (!login) return;
+      unique.set(login, login);
+    });
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [auditLogs]);
+
+  const auditActionOptions = useMemo(() => {
+    const unique = new Set();
+    auditLogs.forEach((item) => {
+      if (item.action) unique.add(item.action);
+    });
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [auditLogs]);
+
+  const auditObjectTypeOptions = useMemo(() => {
+    const unique = new Set();
+    auditLogs.forEach((item) => {
+      if (item.object_type) unique.add(item.object_type);
+    });
+    return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [auditLogs]);
+
   const exportAccessRequestsCsv = (items, prefix) => {
     try {
       const headers = [
@@ -1137,6 +1227,15 @@ export default function usePhoenixAppState() {
       showToast("CSV экспорт готов");
     } catch {
       showToast("Не удалось выгрузить CSV", "error");
+    }
+  };
+
+  const handleExportAuditLogs = async () => {
+    try {
+      await apiExportAuditLogsCsv(token, auditFilters);
+      showToast("CSV аудит выгружен");
+    } catch {
+      showToast("Не удалось выгрузить аудит", "error");
     }
   };
 
@@ -1194,9 +1293,9 @@ export default function usePhoenixAppState() {
       loginCode,
       onLogin: handleLogin,
       onLoginCodeChange: setLoginCode,
-      requestEmail,
-      requestSubject,
-      requestTemplate,
+      requestEmail: publicConfig.support_email,
+      requestSubject: publicConfig.login_request_subject,
+      requestTemplate: publicConfig.login_request_template,
       copied,
       onCopyTemplate: handleCopyTemplate
     },
@@ -1296,6 +1395,14 @@ export default function usePhoenixAppState() {
           filteredReviewableAccessRequests,
           "department_access_requests"
         ),
+      auditLogs,
+      auditStatus,
+      auditFilters,
+      auditActorOptions,
+      auditActionOptions,
+      auditObjectTypeOptions,
+      onAuditFilterChange: handleAuditFilterChange,
+      onExportAuditLogs: handleExportAuditLogs,
       adminCredentials,
       selfCredentials
     }

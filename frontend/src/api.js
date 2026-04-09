@@ -49,6 +49,18 @@ export async function apiLogin(portalLogin, options = {}) {
   return parseJsonResponse(response, "Ошибка входа");
 }
 
+export async function apiFetchPublicConfig() {
+  const response = await fetch(`${API_BASE}/config/public/`, {
+    headers: buildHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error("Ошибка загрузки публичной конфигурации");
+  }
+
+  return parseJsonResponse(response, "Ошибка загрузки публичной конфигурации");
+}
+
 async function apiGet(path, token) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: buildHeaders({
@@ -238,6 +250,49 @@ export async function apiDeleteDepartmentShare(token, id) {
 
 export async function apiFetchAccessRequests(token) {
   return apiGet("/access-requests/", token);
+}
+
+export async function apiFetchAuditLogs(token, params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "" || value === "all") return;
+    query.append(key, value);
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiGet(`/audit-logs/${suffix}`, token);
+}
+
+export async function apiExportAuditLogsCsv(token, params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "" || value === "all") return;
+    query.append(key, value);
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await fetch(`${API_BASE}/audit-logs/export/${suffix}`, {
+    method: "GET",
+    headers: buildHeaders({
+      Authorization: `Token ${token}`
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error("Ошибка экспорта аудита");
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  const filename = match?.[1] || "audit_log_export.csv";
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
 }
 
 export async function apiCreateAccessRequest(token, payload) {
