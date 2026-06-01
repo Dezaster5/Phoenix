@@ -118,11 +118,12 @@ postgres_sslmode = os.getenv("POSTGRES_SSLMODE")
 if postgres_sslmode:
     db_options["sslmode"] = postgres_sslmode
 database_url = os.getenv("DATABASE_URL", "").strip()
+default_conn_max_age = 0 if DEBUG else 60
 if database_url:
     DATABASES = {
         "default": dj_database_url.parse(
             database_url,
-            conn_max_age=env_int("POSTGRES_CONN_MAX_AGE", 60),
+            conn_max_age=env_int("POSTGRES_CONN_MAX_AGE", default_conn_max_age),
             ssl_require=postgres_sslmode == "require",
         )
     }
@@ -135,7 +136,7 @@ else:
             "PASSWORD": os.getenv("POSTGRES_PASSWORD", "phoenix"),
             "HOST": os.getenv("POSTGRES_HOST", "db"),
             "PORT": os.getenv("POSTGRES_PORT", "5432"),
-            "CONN_MAX_AGE": env_int("POSTGRES_CONN_MAX_AGE", 60),
+            "CONN_MAX_AGE": env_int("POSTGRES_CONN_MAX_AGE", default_conn_max_age),
             "OPTIONS": db_options,
         }
     }
@@ -209,11 +210,11 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 3600)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
     SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", True)
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
 
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", not DEBUG)
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
@@ -224,6 +225,7 @@ SECURE_REFERRER_POLICY = os.getenv("SECURE_REFERRER_POLICY", "same-origin")
 SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv("SECURE_CROSS_ORIGIN_OPENER_POLICY", "same-origin")
 CONTENT_SECURITY_POLICY = os.getenv("CONTENT_SECURITY_POLICY", "").strip()
 PERMISSIONS_POLICY = os.getenv("PERMISSIONS_POLICY", "camera=(), microphone=(), geolocation=()").strip()
+AUDIT_CREDENTIAL_LIST_VIEWS = env_bool("AUDIT_CREDENTIAL_LIST_VIEWS", False)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOGGING = {
@@ -284,6 +286,7 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+WHITENOISE_MANIFEST_STRICT = env_bool("WHITENOISE_MANIFEST_STRICT", False)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field

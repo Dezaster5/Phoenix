@@ -16,6 +16,11 @@ class Command(BaseCommand):
             default=180,
             help="Delete audit logs older than this number of days. Use 0 to skip.",
         )
+        parser.add_argument(
+            "--purge-credential-list-views",
+            action="store_true",
+            help="Delete noisy audit rows created by credential list page loads.",
+        )
 
     def handle(self, *args, **options):
         now = timezone.now()
@@ -33,3 +38,11 @@ class Command(BaseCommand):
             self.stdout.write(f"Deleted audit rows: {audit_deleted}")
         else:
             self.stdout.write("Audit cleanup skipped.")
+
+        if options["purge_credential_list_views"]:
+            deleted, _ = AuditLog.objects.filter(
+                action=AuditLog.Action.VIEW,
+                object_type="Credential",
+                object_id="list",
+            ).delete()
+            self.stdout.write(f"Deleted credential list view audit rows: {deleted}")

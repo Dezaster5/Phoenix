@@ -608,18 +608,19 @@ class CredentialViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
-        if isinstance(response.data, list):
-            count = len(response.data)
-        else:
-            count = response.data.get("count") if isinstance(response.data, dict) else None
-        log_action(
-            actor=request.user,
-            action=AuditLog.Action.VIEW,
-            object_type="Credential",
-            object_id="list",
-            metadata={"count": count},
-            request=request,
-        )
+        if getattr(settings, "AUDIT_CREDENTIAL_LIST_VIEWS", False):
+            if isinstance(response.data, list):
+                count = len(response.data)
+            else:
+                count = response.data.get("count") if isinstance(response.data, dict) else None
+            log_action(
+                actor=request.user,
+                action=AuditLog.Action.VIEW,
+                object_type="Credential",
+                object_id="list",
+                metadata={"count": count},
+                request=request,
+            )
         return response
 
     @action(detail=True, methods=["get"], permission_classes=[IsAuthenticated], url_path="download-secret")

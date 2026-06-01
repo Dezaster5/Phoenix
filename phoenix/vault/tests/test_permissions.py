@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from rest_framework.test import APIClient
 
-from vault.models import AccessRequest, Credential, Department, DepartmentShare, Service
+from vault.models import AccessRequest, AuditLog, Credential, Department, DepartmentShare, Service
 
 User = get_user_model()
 
@@ -85,6 +85,15 @@ class PermissionMatrixTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()), 1)
         self.assertEqual(response.json()[0]["user"]["portal_login"], self.emp_it.portal_login)
+
+    def test_credential_list_view_does_not_fill_audit_log(self):
+        self._auth(self.emp_it)
+        before_count = AuditLog.objects.count()
+
+        response = self.client.get("/api/credentials/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(AuditLog.objects.count(), before_count)
 
     def test_department_head_with_share_can_read_but_not_write_other_department(self):
         self._auth(self.head_mkt)

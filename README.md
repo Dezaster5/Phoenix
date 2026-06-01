@@ -190,6 +190,114 @@ Runtime details:
 - WhiteNoise serves static assets;
 - Caddy proxies HTTP traffic to Django.
 
+## SSH Server Deployment With Nginx
+
+Use this path for a single Ubuntu server such as `rest-ubuntu@10.10.10.12`.
+It runs PostgreSQL, Django/Gunicorn, React static files, and Nginx with Docker Compose.
+
+### 1. Install Docker on the server
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo ${UBUNTU_CODENAME:-$VERSION_CODENAME}) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker $USER
+```
+
+Log out and back in after `usermod`, or run:
+
+```bash
+newgrp docker
+```
+
+### 2. Upload or clone the project
+Git clone option:
+
+```bash
+cd ~
+git clone https://github.com/Dezaster5/Phoenix.git phoenix-vault
+cd phoenix-vault
+```
+
+SCP option from your Windows machine:
+
+```powershell
+scp -r C:\Users\Мирас\Desktop\Программирование\Avataria\Phoenix rest-ubuntu@10.10.10.12:~/phoenix-vault
+```
+
+### 3. Create server env
+```bash
+cp scripts/.env.ssh.example .env
+nano .env
+```
+
+Minimum values to change:
+- `DJANGO_SECRET_KEY`
+- `POSTGRES_PASSWORD`
+- `DJANGO_ALLOWED_HOSTS` if the server IP/domain is not `10.10.10.12`
+- `DJANGO_CSRF_TRUSTED_ORIGINS` if the server IP/domain is not `http://10.10.10.12`
+- `FRONTEND_BASE_URL`
+
+Generate a secret key:
+
+```bash
+openssl rand -base64 48
+```
+
+### 4. Start with Nginx
+```bash
+docker compose -f docker-compose.ssh.yml up -d --build
+```
+
+If port `80` is already used by system Nginx or another project, set this in `.env`:
+
+```env
+NGINX_HTTP_PORT=8088
+```
+
+Then start the stack and add a host Nginx reverse proxy:
+
+```bash
+sudo cp deploy/host-nginx-phoenix.conf /etc/nginx/sites-available/phoenix-vault
+sudo ln -s /etc/nginx/sites-available/phoenix-vault /etc/nginx/sites-enabled/phoenix-vault
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Open:
+- Frontend: `http://10.10.10.12/`
+- API health: `http://10.10.10.12/api/health/live/`
+- Django admin: `http://10.10.10.12/admin/`
+- Company admin: `http://10.10.10.12/company-admin/`
+
+### 5. Generate encryption keys
+The SSH compose file persists keys in the `phoenix_keys` Docker volume.
+
+```bash
+docker compose -f docker-compose.ssh.yml run --rm web python manage.py generate_rsa_keypair
+docker compose -f docker-compose.ssh.yml restart web
+```
+
+### 6. Create superuser
+```bash
+docker compose -f docker-compose.ssh.yml exec web python manage.py createsuperuser
+```
+
+### Useful server commands
+```bash
+docker compose -f docker-compose.ssh.yml ps
+docker compose -f docker-compose.ssh.yml logs -f web
+docker compose -f docker-compose.ssh.yml logs -f nginx
+docker compose -f docker-compose.ssh.yml restart web
+docker compose -f docker-compose.ssh.yml down
+```
+
+For HTTPS later, put a domain on the server and replace the plain Nginx HTTP setup with TLS termination.
+
 ## Deployment
 
 ### Backend: Render

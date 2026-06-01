@@ -4,6 +4,7 @@ venv
 frontend/node_modules
 frontend/dist
 frontend/.env
+phoenix/staticfiles/
 .env
 keys/
 phoenix/keys/
