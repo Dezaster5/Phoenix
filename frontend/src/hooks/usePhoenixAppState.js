@@ -17,11 +17,12 @@ import {
   apiFetchDepartmentShares,
   apiFetchDepartments,
   apiFetchMe,
-  apiFetchPublicConfig,
+  apiFetchPublicDepartments,
   apiFetchServices,
   apiFetchUsers,
   apiLogin,
   apiExportAuditLogsCsv,
+  apiRegisterByIin,
   apiRejectAccessRequest,
   apiUpdateCredential,
   apiUpdateUser
@@ -29,12 +30,6 @@ import {
 import { useAuth } from "../context/AuthContext.jsx";
 import { demoSections } from "../data/demo";
 
-const DEFAULT_PUBLIC_CONFIG = {
-  support_email: "",
-  login_request_subject: "Запрос логина Phoenix Vault",
-  login_request_template:
-    "Здравствуйте!\n\nПрошу выдать логин для доступа в Phoenix Vault.\nФИО: ____\nОтдел: ____\nДолжность: ____\nКорпоративная почта: ____\nНужные сервисы: ____\n\nСпасибо!"
-};
 const ACCESS_REQUEST_STATUS_LABEL = {
   pending: "ожидает",
   approved: "одобрен",
@@ -126,6 +121,8 @@ const groupCredentialsByService = (credentials) => {
       ssh_fingerprint: cred.ssh_fingerprint || "",
       password: cred.password,
       notes: cred.notes,
+      created_at: cred.created_at,
+      updated_at: cred.updated_at,
       owner_login: cred.user?.portal_login || "",
       owner_name: cred.user?.full_name || "",
       owner_department: cred.user?.department?.name || "Без отдела"
@@ -215,6 +212,18 @@ const createAccessRequestForm = () => ({
   justification: ""
 });
 
+const createRegistrationForm = () => ({
+  iin: "",
+  department_id: "",
+  portal_login: ""
+});
+
+const byDateDesc = (field) => (a, b) => {
+  const aTime = new Date(a?.[field] || 0).getTime() || 0;
+  const bTime = new Date(b?.[field] || 0).getTime() || 0;
+  return bTime - aTime;
+};
+
 const filterAccessRequests = (items, filterState) => {
   const query = String(filterState.query || "").trim().toLowerCase();
 
@@ -261,10 +270,11 @@ export default function usePhoenixAppState() {
   const [sections, setSections] = useState(demoSections);
   const [search, setSearch] = useState("");
   const [serviceFilter, setServiceFilter] = useState("all");
-  const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: "", type: "success" });
   const [status, setStatus] = useState(createStatusState());
-  const [publicConfig, setPublicConfig] = useState(DEFAULT_PUBLIC_CONFIG);
+  const [publicDepartments, setPublicDepartments] = useState([]);
+  const [registrationForm, setRegistrationForm] = useState(createRegistrationForm());
+  const [registrationStatus, setRegistrationStatus] = useState(createMessageState());
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminDepartments, setAdminDepartments] = useState([]);
   const [adminServices, setAdminServices] = useState([]);
@@ -320,22 +330,16 @@ export default function usePhoenixAppState() {
   }, [toast.visible, toast.message]);
 
   useEffect(() => {
-    const loadPublicConfig = async () => {
+    const loadPublicDepartments = async () => {
       try {
-        const data = await apiFetchPublicConfig();
-        setPublicConfig({
-          support_email: data.support_email || "",
-          login_request_subject:
-            data.login_request_subject || DEFAULT_PUBLIC_CONFIG.login_request_subject,
-          login_request_template:
-            data.login_request_template || DEFAULT_PUBLIC_CONFIG.login_request_template
-        });
+        const departments = await apiFetchPublicDepartments();
+        setPublicDepartments(Array.isArray(departments) ? departments : departments.results || []);
       } catch {
-        setPublicConfig(DEFAULT_PUBLIC_CONFIG);
+        setPublicDepartments([]);
       }
     };
 
-    loadPublicConfig();
+    loadPublicDepartments();
     return undefined;
   }, []);
 
@@ -350,7 +354,10 @@ export default function usePhoenixAppState() {
           apiFetchMe(token),
           apiFetchServices(token)
         ]);
-        setSections(groupCredentialsByService(credentials));
+        const credentialItems = (Array.isArray(credentials) ? credentials : credentials.results || [])
+          .slice()
+          .sort(byDateDesc("updated_at"));
+        setSections(groupCredentialsByService(credentialItems));
         setRequestServices(Array.isArray(services) ? services : services.results || []);
         applyAuthPayload(me);
       } catch (err) {
@@ -374,7 +381,11 @@ export default function usePhoenixAppState() {
     const loadAccessRequests = async () => {
       try {
         const response = await apiFetchAccessRequests(token);
-        setAccessRequests(Array.isArray(response) ? response : response.results || []);
+        setAccessRequests(
+          (Array.isArray(response) ? response : response.results || [])
+            .slice()
+            .sort(byDateDesc("requested_at"))
+        );
       } catch {
         setAccessRequests([]);
       }
@@ -400,8 +411,16 @@ export default function usePhoenixAppState() {
         setAdminUsers(Array.isArray(users) ? users : users.results || []);
         setAdminDepartments(Array.isArray(departments) ? departments : departments.results || []);
         setAdminServices(Array.isArray(services) ? services : services.results || []);
-        setAdminCredentials(Array.isArray(credentials) ? credentials : credentials.results || []);
-        setAdminShares(Array.isArray(shares) ? shares : shares.results || []);
+        setAdminCredentials(
+          (Array.isArray(credentials) ? credentials : credentials.results || [])
+            .slice()
+            .sort(byDateDesc("updated_at"))
+        );
+        setAdminShares(
+          (Array.isArray(shares) ? shares : shares.results || [])
+            .slice()
+            .sort(byDateDesc("created_at"))
+        );
         setAdminStatus({ loading: false, error: "", success: "" });
       } catch (err) {
         setAdminStatus({ loading: false, error: err.message, success: "" });
@@ -559,16 +578,52 @@ export default function usePhoenixAppState() {
     setAdminTab("department");
     setLoginCode("");
     setChallengeRequired(false);
+    setRegistrationForm(createRegistrationForm());
+    setRegistrationStatus(createMessageState());
     navigate("/login", { replace: true });
   };
 
-  const handleCopyTemplate = async () => {
+  const handleRegistrationChange = (field) => (event) => {
+    const value = event.target.value;
+    setRegistrationForm((prev) => ({
+      ...prev,
+      [field]: field === "iin" ? value.replace(/\D/g, "").slice(0, 12) : value
+    }));
+    setRegistrationStatus((prev) => ({ ...prev, error: "", success: "" }));
+  };
+
+  const handleRegisterByIin = async (event) => {
+    event.preventDefault();
+    setRegistrationStatus({ loading: true, error: "", success: "" });
     try {
-      await navigator.clipboard.writeText(publicConfig.login_request_template);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
+      if (!registrationForm.iin || registrationForm.iin.length !== 12) {
+        throw new Error("Введите ИИН из 12 цифр.");
+      }
+      if (!registrationForm.department_id) {
+        throw new Error("Выберите отдел.");
+      }
+      if (!registrationForm.portal_login.trim()) {
+        throw new Error("Придумайте логин.");
+      }
+
+      const user = await apiRegisterByIin({
+        iin: registrationForm.iin,
+        department_id: Number(registrationForm.department_id),
+        portal_login: registrationForm.portal_login.trim()
+      });
+      setPortalLogin(user.portal_login || registrationForm.portal_login.trim());
+      setRegistrationForm(createRegistrationForm());
+      setRegistrationStatus({
+        loading: false,
+        error: "",
+        success: "Регистрация завершена. Теперь войдите по созданному логину."
+      });
+    } catch (err) {
+      setRegistrationStatus({
+        loading: false,
+        error: err.message || "Не удалось зарегистрироваться.",
+        success: ""
+      });
     }
   };
 
@@ -616,12 +671,20 @@ export default function usePhoenixAppState() {
 
   const refreshAdminCredentials = async () => {
     const refreshed = await apiFetchCredentials(token);
-    setAdminCredentials(Array.isArray(refreshed) ? refreshed : refreshed.results || []);
+    setAdminCredentials(
+      (Array.isArray(refreshed) ? refreshed : refreshed.results || [])
+        .slice()
+        .sort(byDateDesc("updated_at"))
+    );
   };
 
   const refreshAccessRequests = async () => {
     const response = await apiFetchAccessRequests(token);
-    setAccessRequests(Array.isArray(response) ? response : response.results || []);
+    setAccessRequests(
+      (Array.isArray(response) ? response : response.results || [])
+        .slice()
+        .sort(byDateDesc("requested_at"))
+    );
   };
 
   const handleCreateUser = async (event) => {
@@ -894,7 +957,11 @@ export default function usePhoenixAppState() {
 
       await apiCreateDepartmentShare(token, payload);
       const refreshed = await apiFetchDepartmentShares(token);
-      setAdminShares(Array.isArray(refreshed) ? refreshed : refreshed.results || []);
+      setAdminShares(
+        (Array.isArray(refreshed) ? refreshed : refreshed.results || [])
+          .slice()
+          .sort(byDateDesc("created_at"))
+      );
       setShareForm(createShareForm());
       setShareStatus({
         loading: false,
@@ -1151,12 +1218,12 @@ export default function usePhoenixAppState() {
   }, [reviewRequestFilters.service, reviewRequestServiceOptions]);
 
   const ownFilteredAccessRequests = useMemo(
-    () => filterAccessRequests(ownAccessRequests, ownRequestFilters),
+    () => filterAccessRequests(ownAccessRequests, ownRequestFilters).slice().sort(byDateDesc("requested_at")),
     [ownAccessRequests, ownRequestFilters]
   );
 
   const filteredReviewableAccessRequests = useMemo(
-    () => filterAccessRequests(reviewableAccessRequests, reviewRequestFilters),
+    () => filterAccessRequests(reviewableAccessRequests, reviewRequestFilters).slice().sort(byDateDesc("requested_at")),
     [reviewableAccessRequests, reviewRequestFilters]
   );
 
@@ -1189,6 +1256,7 @@ export default function usePhoenixAppState() {
   const exportAccessRequestsCsv = (items, prefix) => {
     try {
       const headers = [
+        "Запрошено",
         "ID",
         "Статус",
         "Сервис",
@@ -1196,11 +1264,11 @@ export default function usePhoenixAppState() {
         "Ревьюер",
         "Обоснование",
         "Комментарий ревьюера",
-        "Запрошено",
         "Рассмотрено"
       ];
       const escapeCsv = (value) => `"${String(value ?? "").replace(/"/g, "\"\"")}"`;
       const rows = items.map((item) => [
+        item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "",
         item.id,
         ACCESS_REQUEST_STATUS_LABEL[item.status] || item.status,
         item.service?.name || "",
@@ -1208,7 +1276,6 @@ export default function usePhoenixAppState() {
         item.reviewer?.portal_login || "",
         item.justification || "",
         item.review_comment || "",
-        item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "",
         item.reviewed_at ? new Date(item.reviewed_at).toLocaleString("ru-RU") : ""
       ]);
       const csvContent = [headers, ...rows]
@@ -1293,11 +1360,11 @@ export default function usePhoenixAppState() {
       loginCode,
       onLogin: handleLogin,
       onLoginCodeChange: setLoginCode,
-      requestEmail: publicConfig.support_email,
-      requestSubject: publicConfig.login_request_subject,
-      requestTemplate: publicConfig.login_request_template,
-      copied,
-      onCopyTemplate: handleCopyTemplate
+      registrationForm,
+      registrationStatus,
+      publicDepartments,
+      onRegistrationChange: handleRegistrationChange,
+      onRegisterByIin: handleRegisterByIin
     },
     sidebarProps: {
       viewerFullName,

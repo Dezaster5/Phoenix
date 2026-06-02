@@ -119,7 +119,7 @@ export default function VaultPage({
             <table className="table table-credentials">
               <thead>
                 <tr>
-                  <th>Сервис</th>
+                  <th>Наименование</th>
                   <th>Логин</th>
                   <th>Пароль / Ключ</th>
                   <th>Действия</th>

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import dj_database_url
 from dotenv import load_dotenv
@@ -13,6 +14,21 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 def env_list(name, default=""):
     return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+def env_allowed_hosts(name, default=""):
+    hosts = []
+    for item in env_list(name, default):
+        value = item
+        if "://" in value:
+            value = urlsplit(value).hostname or value
+        elif ":" in value and not value.startswith("["):
+            # ALLOWED_HOSTS accepts hostnames only; Docker/Vite targets may be written as web:8000.
+            value = value.split(":", 1)[0]
+        value = value.strip("[]")
+        if value and value not in hosts:
+            hosts.append(value)
+    return hosts
 
 
 def env_bool(name, default=False):
@@ -41,7 +57,7 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env_bool("DJANGO_DEBUG", True)
 
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = env_allowed_hosts("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,web")
 
 CSRF_TRUSTED_ORIGINS = env_list(
     "DJANGO_CSRF_TRUSTED_ORIGINS",
@@ -165,6 +181,14 @@ PUBLIC_LOGIN_REQUEST_TEMPLATE = os.getenv(
     "PUBLIC_LOGIN_REQUEST_TEMPLATE",
     "Здравствуйте!%0A%0AПрошу выдать логин для доступа в Phoenix Vault.%0AФИО: ____%0AОтдел: ____%0AДолжность: ____%0AКорпоративная почта: ____%0AНужные сервисы: ____%0A%0AСпасибо!",
 ).replace("%0A", "\n")
+
+AVATRACKER_EMPLOYEE_URL = os.getenv(
+    "AVATRACKER_EMPLOYEE_URL",
+    "https://avatracker.online/api/v1/employees/{iin}",
+)
+AVATRACKER_API_TOKEN = os.getenv("AVATRACKER_API_TOKEN", "")
+AVATRACKER_AUTH_SCHEME = os.getenv("AVATRACKER_AUTH_SCHEME", "Token")
+AVATRACKER_TIMEOUT_SECONDS = env_int("AVATRACKER_TIMEOUT_SECONDS", 5)
 
 EMAIL_NOTIFICATIONS_ENABLED = env_bool("EMAIL_NOTIFICATIONS_ENABLED", False)
 EMAIL_BACKEND = os.getenv(

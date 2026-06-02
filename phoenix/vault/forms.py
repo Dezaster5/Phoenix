@@ -21,6 +21,7 @@ class UserCreationForm(forms.ModelForm):
         model = User
         fields = (
             "portal_login",
+            "iin",
             "full_name",
             "email",
             "department",
@@ -61,6 +62,7 @@ class UserChangeForm(forms.ModelForm):
         model = User
         fields = (
             "portal_login",
+            "iin",
             "full_name",
             "email",
             "department",

@@ -389,6 +389,17 @@ export default function AdminPanel({
     }
   };
 
+  const renderServiceCell = (service) => (
+    <div className="service-cell">
+      <span>{service?.name || "Сервис"}</span>
+      {service?.url && (
+        <a href={service.url} target="_blank" rel="noreferrer">
+          Открыть
+        </a>
+      )}
+    </div>
+  );
+
   const handleReject = (requestId) => {
     const reason = String(reviewComments[requestId] || "").trim();
     if (!reason) {
@@ -518,15 +529,17 @@ export default function AdminPanel({
               <aside className="credentials-users">
                 <div className="credentials-users-header">
                   <h3>Сотрудники</h3>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="Добавить сотрудника"
-                    aria-label="Добавить сотрудника"
-                    onClick={() => setShowUserCreate(true)}
-                  >
-                    +
-                  </button>
+                  {isSuperuser && (
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="Добавить сотрудника"
+                      aria-label="Добавить сотрудника"
+                      onClick={() => setShowUserCreate(true)}
+                    >
+                      +
+                    </button>
+                  )}
                 </div>
 
                 <input
@@ -610,7 +623,7 @@ export default function AdminPanel({
                     <table className="table table-credentials">
                       <thead>
                         <tr>
-                          <th>Сервис</th>
+                          <th>Наименование</th>
                           <th>Логин</th>
                           <th>Пароль / Ключ</th>
                           <th>Действия</th>
@@ -619,7 +632,7 @@ export default function AdminPanel({
                       <tbody>
                         {pagedCredentialsForSelectedUser.map((credential) => (
                           <tr key={credential.id}>
-                            <td>{credential.service?.name || "Сервис"}</td>
+                            <td>{renderServiceCell(credential.service)}</td>
                             <td>
                               {editCredentialId === credential.id ? (
                                 editCredentialForm.secret_type === "password" ? (
@@ -812,10 +825,10 @@ export default function AdminPanel({
                 <table className="table">
                   <thead>
                     <tr>
+                      <th>Срок действия</th>
                       <th>Отдел</th>
                       <th>Кто выдал</th>
                       <th>Кому выдано</th>
-                      <th>Срок действия</th>
                       <th>Статус</th>
                       <th>Действия</th>
                     </tr>
@@ -823,10 +836,10 @@ export default function AdminPanel({
                   <tbody>
                     {filteredShares.map((share) => (
                       <tr key={share.id}>
+                        <td>{formatDateTime(share.expires_at)}</td>
                         <td>{share.department?.name || "Без отдела"}</td>
                         <td>{share.grantor?.portal_login || "—"}</td>
                         <td>{share.grantee?.portal_login || "—"}</td>
-                        <td>{formatDateTime(share.expires_at)}</td>
                         <td>{share.is_active ? "активен" : "выключен"}</td>
                         <td>
                           {canRevokeShare(share) ? (
@@ -898,10 +911,10 @@ export default function AdminPanel({
                 <table className="table">
                   <thead>
                     <tr>
+                      <th>Дата</th>
                       <th>Сотрудник</th>
                       <th>Сервис</th>
                       <th>Комментарий</th>
-                      <th>Дата</th>
                       <th>Статус</th>
                       <th>Действия</th>
                     </tr>
@@ -909,10 +922,10 @@ export default function AdminPanel({
                   <tbody>
                     {accessRequests.map((item) => (
                       <tr key={item.id}>
-                        <td>{item.requester?.portal_login || "Сотрудник"}</td>
-                        <td>{item.service?.name || "Сервис"}</td>
-                        <td>{item.justification || "—"}</td>
                         <td>{formatDateTime(item.requested_at)}</td>
+                        <td>{item.requester?.portal_login || "Сотрудник"}</td>
+                        <td>{renderServiceCell(item.service)}</td>
+                        <td>{item.justification || "—"}</td>
                         <td>
                           <span className={getRequestBadgeClass(item.status)}>
                             <span>{getRequestBadgeIcon(item.status)}</span>
@@ -1088,7 +1101,7 @@ export default function AdminPanel({
                 <table className="table table-credentials">
                   <thead>
                     <tr>
-                      <th>Сервис</th>
+                      <th>Наименование</th>
                       <th>Логин</th>
                       <th>Пароль / Ключ</th>
                       <th>Действия</th>
@@ -1097,7 +1110,7 @@ export default function AdminPanel({
                   <tbody>
                     {selfPageRows.map((credential) => (
                       <tr key={credential.id}>
-                        <td>{credential.service?.name || "Сервис"}</td>
+                        <td>{renderServiceCell(credential.service)}</td>
                         <td>
                           {credential.secret_type === "ssh_key" || credential.secret_type === "api_token" ? (
                             "—"
@@ -1227,7 +1240,7 @@ export default function AdminPanel({
                 <table className="table table-credentials">
                   <thead>
                     <tr>
-                      <th>Сервис</th>
+                      <th>Наименование</th>
                       <th>Логин</th>
                       <th>Пароль / Ключ</th>
                       <th>Действия</th>
@@ -1236,7 +1249,7 @@ export default function AdminPanel({
                   <tbody>
                     {sharedPageRows.map((credential) => (
                       <tr key={credential.id}>
-                        <td>{credential.service?.name || "Сервис"}</td>
+                        <td>{renderServiceCell(credential.service)}</td>
                         <td>
                           {credential.secret_type === "ssh_key" || credential.secret_type === "api_token" ? (
                             "—"
@@ -1335,7 +1348,17 @@ export default function AdminPanel({
               </button>
             </div>
             <div className="detail-list">
-              <div><strong>Сервис:</strong> {credentialDetails.service?.name || "—"}</div>
+              <div>
+                <strong>Сервис:</strong> {credentialDetails.service?.name || "—"}
+                {credentialDetails.service?.url && (
+                  <>
+                    {" "}
+                    <a href={credentialDetails.service.url} target="_blank" rel="noreferrer">
+                      Открыть
+                    </a>
+                  </>
+                )}
+              </div>
               <div><strong>Сотрудник:</strong> {credentialDetails.user?.full_name || credentialDetails.user?.portal_login || "—"}</div>
               <div><strong>Тип:</strong> {getSecretTypeLabel(credentialDetails.secret_type)}</div>
               <div><strong>Статус:</strong> {credentialDetails.is_active ? "Активен" : "Выключен"}</div>
@@ -1462,7 +1485,7 @@ export default function AdminPanel({
         </div>
       )}
 
-      {showUserCreate && (
+      {showUserCreate && isSuperuser && (
         <div className="modal-backdrop">
           <div className="modal">
             <div className="modal-header">

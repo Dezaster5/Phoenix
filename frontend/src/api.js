@@ -22,6 +22,17 @@ async function parseJsonResponse(response, fallbackMessage) {
   return response.json();
 }
 
+function formatApiError(detail, fallbackMessage) {
+  if (typeof detail === "string") return detail;
+  if (!detail || typeof detail !== "object") return fallbackMessage;
+  if (detail.detail) return detail.detail;
+  const messages = Object.entries(detail).flatMap(([field, value]) => {
+    const values = Array.isArray(value) ? value : [value];
+    return values.map((item) => (field === "non_field_errors" ? item : `${field}: ${item}`));
+  });
+  return messages.join("; ") || fallbackMessage;
+}
+
 export async function apiLogin(portalLogin, options = {}) {
   const payload = { portal_login: portalLogin };
   if (options.code) {
@@ -61,6 +72,37 @@ export async function apiFetchPublicConfig() {
   return parseJsonResponse(response, "Ошибка загрузки публичной конфигурации");
 }
 
+export async function apiFetchPublicDepartments() {
+  const response = await fetch(`${API_BASE}/public/departments/`, {
+    headers: buildHeaders()
+  });
+
+  if (!response.ok) {
+    throw new Error("Ошибка загрузки отделов");
+  }
+
+  return parseJsonResponse(response, "Ошибка загрузки отделов");
+}
+
+export async function apiRegisterByIin(payload) {
+  const response = await fetch(`${API_BASE}/auth/register-iin/`, {
+    method: "POST",
+    headers: buildHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const detail = await parseJsonResponse(response, "Ошибка регистрации").catch(() => ({
+      detail: "Ошибка регистрации"
+    }));
+    throw new Error(formatApiError(detail, "Ошибка регистрации"));
+  }
+
+  return parseJsonResponse(response, "Ошибка регистрации");
+}
+
 async function apiGet(path, token) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: buildHeaders({
@@ -95,7 +137,7 @@ async function apiWrite(path, token, method, payload, fallbackMessage) {
     const detail = await parseJsonResponse(response, fallbackMessage).catch(() => ({
       detail: fallbackMessage
     }));
-    const message = typeof detail === "object" ? detail.detail || JSON.stringify(detail) : detail;
+    const message = formatApiError(detail, fallbackMessage);
     throw new Error(message || fallbackMessage);
   }
 

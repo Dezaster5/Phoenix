@@ -38,6 +38,7 @@ from .serializers import (
     CredentialWriteSerializer,
     DepartmentSerializer,
     DepartmentShareSerializer,
+    IinRegistrationSerializer,
     ServiceAccessSerializer,
     ServiceSerializer,
     UserSerializer,
@@ -311,6 +312,34 @@ class PublicConfigView(APIView):
         )
 
 
+class PublicDepartmentListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        departments = Department.objects.filter(is_active=True).order_by("sort_order", "name")
+        return Response(DepartmentSerializer(departments, many=True).data)
+
+
+class IinRegistrationView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        serializer = IinRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+        user = result["user"]
+        log_action(
+            actor=None,
+            action=AuditLog.Action.CREATE,
+            obj=user,
+            metadata={"source": "iin_registration", "department_id": user.department_id},
+            request=request,
+        )
+        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+
+
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -367,6 +396,8 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._ensure_can_manage_users()
+        if not _is_superuser(self.request.user):
+            raise PermissionDenied("Сотрудники регистрируются самостоятельно по ИИН.")
         user = serializer.save()
         log_action(self.request.user, AuditLog.Action.CREATE, user, request=self.request)
 

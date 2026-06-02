@@ -12,6 +12,7 @@ services:
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
       COLLECT_STATIC: ${COLLECT_STATIC:-0}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1},web
       POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-0}
     depends_on:
       db:
@@ -43,6 +44,22 @@ services:
     ports:
       - "8080:8080"
 
+  frontend:
+    image: node:20-alpine
+    working_dir: /app/frontend
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: /api
+      VITE_PROXY_TARGET: http://web:8000
+    depends_on:
+      web:
+        condition: service_healthy
+
   ngrok:
     image: ngrok/ngrok:latest
     profiles:
@@ -57,3 +74,4 @@ services:
 
 volumes:
   postgres_data:
+  frontend_node_modules:

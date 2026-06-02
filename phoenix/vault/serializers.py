@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import serializers
 
+from .employee_registry import EmployeeRegistryError, fetch_employee_identity_by_iin
 from .models import (
     AccessRequest,
     AuditLog,
@@ -34,6 +35,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "portal_login",
+            "iin",
             "full_name",
             "email",
             "role",
@@ -60,6 +62,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "portal_login",
+            "iin",
             "full_name",
             "email",
             "role",
@@ -132,6 +135,61 @@ class UserWriteSerializer(serializers.ModelSerializer):
                 instance.set_unusable_password()
         instance.save()
         return instance
+
+
+class IinRegistrationSerializer(serializers.Serializer):
+    iin = serializers.CharField(max_length=12)
+    department_id = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.filter(is_active=True),
+        source="department",
+        write_only=True,
+    )
+    portal_login = serializers.CharField(max_length=64)
+    user = UserSerializer(read_only=True)
+
+    def validate_iin(self, value):
+        normalized = str(value or "").strip()
+        if not normalized.isdigit() or len(normalized) != 12:
+            raise serializers.ValidationError("ИИН должен состоять из 12 цифр.")
+        if User.objects.filter(iin=normalized).exists():
+            raise serializers.ValidationError("Пользователь уже зарегистрирован.")
+        return normalized
+
+    def validate_portal_login(self, value):
+        normalized = User.normalize_username(str(value or "").strip())
+        if not normalized:
+            raise serializers.ValidationError("Укажите логин.")
+        if User.objects.filter(portal_login=normalized).exists():
+            raise serializers.ValidationError("Логин уже занят. Укажите другой логин.")
+        return normalized
+
+    def validate(self, attrs):
+        try:
+            identity = fetch_employee_identity_by_iin(attrs["iin"])
+        except EmployeeRegistryError:
+            raise serializers.ValidationError(
+                {"iin": "Не удалось проверить сотрудника. Попробуйте позже."}
+            ) from None
+        if identity is None:
+            raise serializers.ValidationError({"iin": "Сотрудник с таким ИИН не найден."})
+        if not identity.get("is_active"):
+            raise serializers.ValidationError({"iin": "Сотрудник не активен."})
+        attrs["identity"] = identity
+        return attrs
+
+    def create(self, validated_data):
+        identity = validated_data.pop("identity")
+        department = validated_data.pop("department")
+        user = User.objects.create_user(
+            portal_login=validated_data["portal_login"],
+            password=None,
+            iin=identity["iin"],
+            full_name=identity["full_name"],
+            role=User.Role.EMPLOYEE,
+            department=department,
+            is_active=True,
+        )
+        return {"user": user}
 
 
 class ServiceSerializer(serializers.ModelSerializer):

@@ -61,6 +61,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         EMPLOYEE = "employee", "Employee"
 
     portal_login = models.CharField(max_length=64, unique=True)
+    iin = models.CharField(max_length=12, unique=True, null=True, blank=True)
     email = models.EmailField(blank=True)
     full_name = models.CharField(max_length=128, blank=True)
     role = models.CharField(max_length=16, choices=Role.choices, default=Role.EMPLOYEE)
@@ -79,6 +80,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.portal_login
+
+    def save(self, *args, **kwargs):
+        if self.iin == "":
+            self.iin = None
+        super().save(*args, **kwargs)
 
     @property
     def is_company_admin(self) -> bool:
@@ -136,7 +142,7 @@ class ServiceAccess(models.Model):
 
     class Meta:
         unique_together = ("user", "service")
-        ordering = ["service__name"]
+        ordering = ["-updated_at", "service__name"]
 
     def __str__(self):
         return f"{self.user.portal_login} -> {self.service.name}"
@@ -175,7 +181,7 @@ class Credential(models.Model):
 
     class Meta:
         unique_together = ("user", "service")
-        ordering = ["service__name"]
+        ordering = ["-updated_at", "service__name"]
 
     def __str__(self):
         return f"{self.user.portal_login} -> {self.service.name}"

@@ -137,9 +137,9 @@ export default function ServicesPage({
             <table className="table">
               <thead>
                 <tr>
+                  <th>Дата</th>
                   <th>Сервис</th>
                   <th>Комментарий</th>
-                  <th>Дата</th>
                   <th>Статус</th>
                   <th>Ответ руководителя</th>
                   <th>Действия</th>
@@ -148,9 +148,9 @@ export default function ServicesPage({
               <tbody>
                 {ownAccessRequests.map((item) => (
                   <tr key={item.id}>
+                    <td>{item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "—"}</td>
                     <td>{item.service?.name || "Сервис"}</td>
                     <td>{item.justification || "—"}</td>
-                    <td>{item.requested_at ? new Date(item.requested_at).toLocaleString("ru-RU") : "—"}</td>
                     <td>
                       <span className={getRequestBadgeClass(item.status)}>
                         <span>{getRequestBadgeIcon(item.status)}</span>

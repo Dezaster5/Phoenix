@@ -24,6 +24,7 @@ class UserAdmin(DjangoUserAdmin):
     ordering = ("portal_login",)
     list_display = (
         "portal_login",
+        "iin",
         "full_name",
         "department",
         "role",
@@ -32,11 +33,11 @@ class UserAdmin(DjangoUserAdmin):
         "is_superuser",
     )
     list_filter = ("role", "department", "is_active", "is_staff", "is_superuser")
-    search_fields = ("portal_login", "full_name", "email", "department__name")
+    search_fields = ("portal_login", "iin", "full_name", "email", "department__name")
 
     fieldsets = (
         (None, {"fields": ("portal_login", "password")}),
-        ("Profile", {"fields": ("full_name", "email", "department")}),
+        ("Profile", {"fields": ("iin", "full_name", "email", "department")}),
         (
             "Permissions",
             {"fields": ("role", "is_active", "is_staff", "is_superuser", "groups", "user_permissions")},
@@ -51,6 +52,7 @@ class UserAdmin(DjangoUserAdmin):
                 "classes": ("wide",),
                 "fields": (
                     "portal_login",
+                    "iin",
                     "full_name",
                     "email",
                     "department",
@@ -82,7 +84,7 @@ class ServiceAdmin(admin.ModelAdmin):
 
 @admin.register(Credential)
 class CredentialAdmin(admin.ModelAdmin):
-    list_display = ("service", "user", "login", "is_active", "updated_at")
+    list_display = ("updated_at", "service", "user", "login", "is_active")
     list_filter = ("is_active", "service", "user")
     search_fields = ("login", "service__name", "user__portal_login")
     list_select_related = ("service", "user")
@@ -90,7 +92,7 @@ class CredentialAdmin(admin.ModelAdmin):
 
 @admin.register(ServiceAccess)
 class ServiceAccessAdmin(admin.ModelAdmin):
-    list_display = ("service", "user", "is_active", "updated_at")
+    list_display = ("updated_at", "service", "user", "is_active")
     list_filter = ("is_active", "service")
     search_fields = ("service__name", "user__portal_login")
     list_select_related = ("service", "user")
@@ -115,21 +117,21 @@ class AuditLogAdmin(admin.ModelAdmin):
 
 @admin.register(DepartmentShare)
 class DepartmentShareAdmin(admin.ModelAdmin):
-    list_display = ("department", "grantor", "grantee", "expires_at", "is_active", "created_at")
+    list_display = ("created_at", "expires_at", "department", "grantor", "grantee", "is_active")
     list_filter = ("department", "is_active")
     search_fields = ("department__name", "grantor__portal_login", "grantee__portal_login")
 
 
 @admin.register(AccessRequest)
 class AccessRequestAdmin(admin.ModelAdmin):
-    list_display = ("requester", "service", "status", "reviewer", "requested_at", "reviewed_at")
+    list_display = ("requested_at", "requester", "service", "status", "reviewer", "reviewed_at")
     list_filter = ("status", "service")
     search_fields = ("requester__portal_login", "service__name", "reviewer__portal_login")
 
 
 @admin.register(CredentialVersion)
 class CredentialVersionAdmin(admin.ModelAdmin):
-    list_display = ("credential", "version", "change_type", "changed_by", "created_at")
+    list_display = ("created_at", "credential", "version", "change_type", "changed_by")
     list_filter = ("change_type",)
     search_fields = ("credential__user__portal_login", "credential__service__name", "changed_by__portal_login")
     readonly_fields = ("credential", "version", "created_at", "changed_by")

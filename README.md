@@ -19,6 +19,7 @@ Phoenix Vault supports three practical operating roles:
 Core product capabilities:
 - credential storage with encrypted secret values;
 - audit log with actor, IP, user agent, object, and action;
+- self-registration by IIN with duplicate-IIN and duplicate-login protection;
 - access request workflow: create / approve / reject / cancel;
 - credential version history;
 - optional login challenge using one-time code or magic token;
@@ -56,6 +57,7 @@ Core product capabilities:
 
 ### Identity and access model
 - custom user identity based on `portal_login`;
+- public employee registration by IIN through the Avatracker employee registry;
 - department-scoped RBAC;
 - read-only department sharing for cross-functional visibility.
 
@@ -132,17 +134,19 @@ cp frontend/.env.example frontend/.env
 docker compose run --rm web python manage.py generate_rsa_keypair
 ```
 
-### 3. Start backend stack
+### 3. Start local stack
 ```bash
 docker compose up -d --build
 ```
+
+This starts backend, PostgreSQL, Adminer, and the Vite frontend. The frontend container proxies `/api` to `web:8000`.
 
 ### 4. Create superuser
 ```bash
 docker compose exec web python manage.py createsuperuser
 ```
 
-### 5. Start frontend
+### 5. Optional: run frontend manually instead of Docker
 ```bash
 cd frontend
 npm install
@@ -257,6 +261,9 @@ If port `80` is already used by system Nginx or another project, set this in `.e
 
 ```env
 NGINX_HTTP_PORT=8088
+DJANGO_CSRF_TRUSTED_ORIGINS=http://10.10.10.12:8088
+DJANGO_CORS_ALLOWED_ORIGINS=http://10.10.10.12:8088
+FRONTEND_BASE_URL=http://10.10.10.12:8088
 ```
 
 Then start the stack and add a host Nginx reverse proxy:
@@ -340,6 +347,19 @@ Important auth behavior:
 - direct login without challenge is restricted to configured `PASSWORDLESS_ROLES`;
 - superusers are not allowed to bypass challenge through the direct passwordless path;
 - when challenge mode is enabled, active users authenticate through one-time code / magic token flow.
+
+### Employee registry / IIN registration
+- `AVATRACKER_EMPLOYEE_URL` — endpoint template, default: `https://avatracker.online/api/v1/employees/{iin}`
+- `AVATRACKER_API_TOKEN` — token used by the backend to query the registry
+- `AVATRACKER_AUTH_SCHEME` — authorization scheme, default: `Token`
+- `AVATRACKER_TIMEOUT_SECONDS` — registry request timeout, default: `5`
+
+Registration uses only the registry fields required by Phoenix:
+- `iin`
+- `full_name`
+- `active`
+
+If the IIN is not found, inactive, already registered, or the chosen login is already used, registration is rejected.
 
 ### Public operational config exposed to frontend
 - `PUBLIC_SUPPORT_EMAIL`

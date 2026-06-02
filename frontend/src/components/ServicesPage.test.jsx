@@ -68,6 +68,28 @@ describe("ServicesPage", () => {
     expect(within(table).getByText("Ок")).toBeInTheDocument();
   });
 
+  it("puts request date first in request table", () => {
+    render(
+      <ServicesPage
+        {...baseProps}
+        ownAccessRequests={[
+          {
+            id: 1,
+            service: { name: "Repo" },
+            justification: "Нужно",
+            requested_at: "2026-04-09T10:00:00Z",
+            status: "approved",
+            review_comment: "Ок"
+          }
+        ]}
+        ownAccessRequestsTotal={1}
+      />
+    );
+
+    const headers = screen.getAllByRole("columnheader").map((header) => header.textContent);
+    expect(headers.slice(0, 2)).toEqual(["Дата", "Сервис"]);
+  });
+
   it("shows the available services disclosure with links", () => {
     render(<ServicesPage {...baseProps} />);
 

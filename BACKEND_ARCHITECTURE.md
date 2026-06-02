@@ -16,6 +16,13 @@
 - Added backup/restore scripts in `scripts/`.
 - Added CI pipeline in `.github/workflows/ci.yml`.
 
+## Update 2026-06-02 (IIN Registration)
+- Added `User.iin` as an optional unique employee identifier.
+- Added public registration endpoint `/api/auth/register-iin/`.
+- Added public active department list endpoint `/api/public/departments/`.
+- IIN registration now verifies employees through the Avatracker API and stores only the required identity fields (`iin`, `full_name`, active status check).
+- Department heads no longer create users through the API; employees self-register by IIN, while superusers can still manage users through Django admin/API.
+
 ## 1. Purpose
 Phoenix backend is a Django + DRF service for:
 - managing employee access to company services;
@@ -93,6 +100,7 @@ Custom auth entity.
 
 Fields:
 - `portal_login` (unique)
+- `iin` (unique, optional; used by public IIN registration)
 - `email`
 - `full_name`
 - `role` (`admin` / `employee`)
@@ -381,6 +389,7 @@ Critical runtime vars:
 - CSRF: `DJANGO_CSRF_TRUSTED_ORIGINS`
 - DB: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`
 - Auth mode: `ALLOW_PASSWORDLESS_LOGIN`, `PASSWORDLESS_ROLES`
+- Employee registry: `AVATRACKER_EMPLOYEE_URL`, `AVATRACKER_API_TOKEN`, `AVATRACKER_AUTH_SCHEME`, `AVATRACKER_TIMEOUT_SECONDS`
 - Encryption: `FERNET_KEY`, `ASYMMETRIC_*`
 
 Recommended key setup:

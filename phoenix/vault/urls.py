@@ -9,7 +9,9 @@ from .views import (
     DepartmentViewSet,
     HealthLiveView,
     HealthReadyView,
+    IinRegistrationView,
     MeView,
+    PublicDepartmentListView,
     PublicConfigView,
     PortalLoginView,
     ServiceAccessViewSet,
@@ -29,7 +31,9 @@ router.register("audit-logs", AuditLogViewSet, basename="audit-log")
     
 urlpatterns = [
     path("auth/login/", PortalLoginView.as_view(), name="portal-login"),
+    path("auth/register-iin/", IinRegistrationView.as_view(), name="iin-registration"),
     path("config/public/", PublicConfigView.as_view(), name="public-config"),
+    path("public/departments/", PublicDepartmentListView.as_view(), name="public-departments"),
     path("health/live/", HealthLiveView.as_view(), name="health-live"),
     path("health/ready/", HealthReadyView.as_view(), name="health-ready"),
     path("me/", MeView.as_view(), name="me"),

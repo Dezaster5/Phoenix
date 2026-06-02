@@ -32,6 +32,12 @@ const baseProps = {
 };
 
 describe("VaultPage", () => {
+  it("uses the business label 'Наименование' for service names", () => {
+    render(<VaultPage {...baseProps} />);
+
+    expect(screen.getByRole("columnheader", { name: "Наименование" })).toBeInTheDocument();
+  });
+
   it("keeps secrets masked by default and reveals them on explicit interaction", async () => {
     const user = userEvent.setup();
 
