@@ -135,12 +135,17 @@ if postgres_sslmode:
     db_options["sslmode"] = postgres_sslmode
 database_url = os.getenv("DATABASE_URL", "").strip()
 default_conn_max_age = 0 if DEBUG else 60
+# PgBouncer in transaction pooling mode (e.g. Neon's "-pooler" endpoint) does not
+# support server-side cursors and raises 'cursor "..." already exists'. Disabling
+# server-side cursors is safe and recommended for pooled connections.
+disable_server_side_cursors = env_bool("POSTGRES_DISABLE_SERVER_SIDE_CURSORS", True)
 if database_url:
     DATABASES = {
         "default": dj_database_url.parse(
             database_url,
             conn_max_age=env_int("POSTGRES_CONN_MAX_AGE", default_conn_max_age),
             ssl_require=postgres_sslmode == "require",
+            disable_server_side_cursors=disable_server_side_cursors,
         )
     }
 else:
@@ -153,6 +158,7 @@ else:
             "HOST": os.getenv("POSTGRES_HOST", "db"),
             "PORT": os.getenv("POSTGRES_PORT", "5432"),
             "CONN_MAX_AGE": env_int("POSTGRES_CONN_MAX_AGE", default_conn_max_age),
+            "DISABLE_SERVER_SIDE_CURSORS": disable_server_side_cursors,
             "OPTIONS": db_options,
         }
     }
