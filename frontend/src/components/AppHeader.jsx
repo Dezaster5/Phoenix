@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 
-export default function AppHeader({ isAuthenticated, onLogout }) {
+export default function AppHeader({ isAuthenticated, onLogout, onOpenPasswordChange }) {
   return (
     <header className="app-header">
       <Link className="brand brand-link" to={isAuthenticated ? "/" : "/login"}>
@@ -15,6 +15,9 @@ export default function AppHeader({ isAuthenticated, onLogout }) {
 
       {isAuthenticated && (
         <div className="header-actions">
+          <button className="btn btn-secondary" type="button" onClick={onOpenPasswordChange}>
+            Сменить пароль
+          </button>
           <button className="btn btn-secondary" type="button" onClick={onLogout}>
             Выйти
           </button>

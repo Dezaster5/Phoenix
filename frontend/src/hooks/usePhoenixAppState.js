@@ -22,7 +22,11 @@ import {
   apiFetchUsers,
   apiLogin,
   apiExportAuditLogsCsv,
-  apiRegisterByIin,
+  apiRegisterRequest,
+  apiRegisterVerify,
+  apiPasswordResetRequest,
+  apiPasswordResetConfirm,
+  apiChangePassword,
   apiRejectAccessRequest,
   apiUpdateCredential,
   apiUpdateUser
@@ -213,9 +217,28 @@ const createAccessRequestForm = () => ({
 });
 
 const createRegistrationForm = () => ({
+  email: "",
   iin: "",
   department_id: "",
-  portal_login: ""
+  password: "",
+  password_confirm: ""
+});
+
+const createLoginForm = () => ({
+  email: "",
+  password: ""
+});
+
+const createResetForm = () => ({
+  email: "",
+  password: "",
+  password_confirm: ""
+});
+
+const createPasswordChangeForm = () => ({
+  current_password: "",
+  password: "",
+  password_confirm: ""
 });
 
 const byDateDesc = (field) => (a, b) => {
@@ -264,9 +287,17 @@ export default function usePhoenixAppState() {
     logout
   } = useAuth();
 
-  const [portalLogin, setPortalLogin] = useState("");
-  const [loginCode, setLoginCode] = useState("");
-  const [challengeRequired, setChallengeRequired] = useState(false);
+  const [loginForm, setLoginForm] = useState(createLoginForm());
+  const [authMode, setAuthMode] = useState("login");
+  const [registrationStep, setRegistrationStep] = useState("form");
+  const [registrationCode, setRegistrationCode] = useState("");
+  const [resetStep, setResetStep] = useState("email");
+  const [resetForm, setResetForm] = useState(createResetForm());
+  const [resetCode, setResetCode] = useState("");
+  const [resetStatus, setResetStatus] = useState(createMessageState());
+  const [passwordChangeForm, setPasswordChangeForm] = useState(createPasswordChangeForm());
+  const [passwordChangeOpen, setPasswordChangeOpen] = useState(false);
+  const [passwordChangeStatus, setPasswordChangeStatus] = useState(createMessageState());
   const [sections, setSections] = useState(demoSections);
   const [search, setSearch] = useState("");
   const [serviceFilter, setServiceFilter] = useState("all");
@@ -506,9 +537,13 @@ export default function usePhoenixAppState() {
   const applyAuthData = (data) => {
     applyAuthPayload(data);
     setAdminTab("department");
-    setPortalLogin("");
-    setLoginCode("");
-    setChallengeRequired(false);
+    setLoginForm(createLoginForm());
+    setAuthMode("login");
+    setRegistrationStep("form");
+    setRegistrationCode("");
+    setResetStep("email");
+    setResetForm(createResetForm());
+    setResetCode("");
     setStatus({ loading: false, error: "", mode: "live" });
     navigate(data.is_superuser || isHeadRole(data.role) ? "/manager" : "/vault", {
       replace: true
@@ -520,50 +555,19 @@ export default function usePhoenixAppState() {
     setStatus({ loading: true, error: "", mode: "live" });
 
     try {
-      const data = await apiLogin(portalLogin, {
-        code: challengeRequired ? loginCode.trim() : undefined
-      });
-
-      if (data.challenge_required) {
-        setChallengeRequired(true);
-        setStatus({
-          loading: false,
-          error: "Введите код из письма и нажмите Войти.",
-          mode: "live"
-        });
-        return;
+      if (!loginForm.email.trim()) {
+        throw new Error("Введите почту.");
+      }
+      if (!loginForm.password) {
+        throw new Error("Введите пароль.");
       }
 
+      const data = await apiLogin(loginForm.email.trim(), loginForm.password);
       applyAuthData(data);
     } catch (err) {
       setStatus({ loading: false, error: err.message, mode: "live" });
     }
   };
-
-  useEffect(() => {
-    if (token) return undefined;
-    const params = new URLSearchParams(window.location.search);
-    const magicToken = params.get("magic_token");
-    const loginFromLink = params.get("portal_login");
-    if (!magicToken || !loginFromLink) return undefined;
-
-    const runMagicLogin = async () => {
-      setStatus({ loading: true, error: "", mode: "live" });
-      try {
-        const data = await apiLogin(loginFromLink, { magicToken });
-        applyAuthData(data);
-      } catch (err) {
-        setStatus({
-          loading: false,
-          error: err.message || "Ошибка входа по ссылке",
-          mode: "live"
-        });
-      }
-    };
-
-    runMagicLogin();
-    return undefined;
-  }, [token]);
 
   const handleLogout = () => {
     logout();
@@ -576,11 +580,22 @@ export default function usePhoenixAppState() {
     setReviewRequestFilters(createReviewRequestFilters());
     setServiceFilter("all");
     setAdminTab("department");
-    setLoginCode("");
-    setChallengeRequired(false);
+    setLoginForm(createLoginForm());
+    setAuthMode("login");
+    setRegistrationStep("form");
+    setRegistrationCode("");
+    setResetStep("email");
+    setResetForm(createResetForm());
+    setResetCode("");
     setRegistrationForm(createRegistrationForm());
     setRegistrationStatus(createMessageState());
+    setResetStatus(createMessageState());
     navigate("/login", { replace: true });
+  };
+
+  const handleLoginFormChange = (field) => (event) => {
+    setLoginForm((prev) => ({ ...prev, [field]: event.target.value }));
+    setStatus((prev) => ({ ...prev, error: "" }));
   };
 
   const handleRegistrationChange = (field) => (event) => {
@@ -592,36 +607,184 @@ export default function usePhoenixAppState() {
     setRegistrationStatus((prev) => ({ ...prev, error: "", success: "" }));
   };
 
-  const handleRegisterByIin = async (event) => {
+  const handleRegisterRequest = async (event) => {
     event.preventDefault();
     setRegistrationStatus({ loading: true, error: "", success: "" });
     try {
+      if (!registrationForm.email.trim()) {
+        throw new Error("Введите почту.");
+      }
       if (!registrationForm.iin || registrationForm.iin.length !== 12) {
         throw new Error("Введите ИИН из 12 цифр.");
       }
       if (!registrationForm.department_id) {
         throw new Error("Выберите отдел.");
       }
-      if (!registrationForm.portal_login.trim()) {
-        throw new Error("Придумайте логин.");
+      if (!registrationForm.password || registrationForm.password.length < 8) {
+        throw new Error("Пароль должен содержать минимум 8 символов.");
+      }
+      if (registrationForm.password !== registrationForm.password_confirm) {
+        throw new Error("Пароли не совпадают.");
       }
 
-      const user = await apiRegisterByIin({
+      await apiRegisterRequest({
+        email: registrationForm.email.trim(),
         iin: registrationForm.iin,
         department_id: Number(registrationForm.department_id),
-        portal_login: registrationForm.portal_login.trim()
+        password: registrationForm.password,
+        password_confirm: registrationForm.password_confirm
       });
-      setPortalLogin(user.portal_login || registrationForm.portal_login.trim());
-      setRegistrationForm(createRegistrationForm());
+
+      setRegistrationStep("verify");
       setRegistrationStatus({
         loading: false,
         error: "",
-        success: "Регистрация завершена. Теперь войдите по созданному логину."
+        success: "Код отправлен на почту. Введите его для завершения регистрации."
       });
     } catch (err) {
       setRegistrationStatus({
         loading: false,
-        error: err.message || "Не удалось зарегистрироваться.",
+        error: err.message || "Не удалось начать регистрацию.",
+        success: ""
+      });
+    }
+  };
+
+  const handleRegisterVerify = async (event) => {
+    event.preventDefault();
+    setRegistrationStatus({ loading: true, error: "", success: "" });
+    try {
+      if (!registrationCode.trim()) {
+        throw new Error("Введите код из письма.");
+      }
+
+      await apiRegisterVerify({
+        email: registrationForm.email.trim(),
+        code: registrationCode.trim()
+      });
+
+      setLoginForm({
+        email: registrationForm.email.trim(),
+        password: registrationForm.password
+      });
+      setRegistrationForm(createRegistrationForm());
+      setRegistrationStep("form");
+      setRegistrationCode("");
+      setAuthMode("login");
+      setRegistrationStatus({
+        loading: false,
+        error: "",
+        success: "Регистрация завершена. Теперь войдите по почте и паролю."
+      });
+    } catch (err) {
+      setRegistrationStatus({
+        loading: false,
+        error: err.message || "Не удалось подтвердить регистрацию.",
+        success: ""
+      });
+    }
+  };
+
+  const handleResetFormChange = (field) => (event) => {
+    setResetForm((prev) => ({ ...prev, [field]: event.target.value }));
+    setResetStatus((prev) => ({ ...prev, error: "", success: "" }));
+  };
+
+  const handleResetRequest = async (event) => {
+    event.preventDefault();
+    setResetStatus({ loading: true, error: "", success: "" });
+    try {
+      if (!resetForm.email.trim()) {
+        throw new Error("Введите почту.");
+      }
+      await apiPasswordResetRequest(resetForm.email.trim());
+      setResetStep("confirm");
+      setResetStatus({
+        loading: false,
+        error: "",
+        success: "Код отправлен на почту."
+      });
+    } catch (err) {
+      setResetStatus({
+        loading: false,
+        error: err.message || "Не удалось отправить код.",
+        success: ""
+      });
+    }
+  };
+
+  const handleResetConfirm = async (event) => {
+    event.preventDefault();
+    setResetStatus({ loading: true, error: "", success: "" });
+    try {
+      if (!resetCode.trim()) {
+        throw new Error("Введите код из письма.");
+      }
+      if (!resetForm.password || resetForm.password.length < 8) {
+        throw new Error("Пароль должен содержать минимум 8 символов.");
+      }
+      if (resetForm.password !== resetForm.password_confirm) {
+        throw new Error("Пароли не совпадают.");
+      }
+
+      await apiPasswordResetConfirm({
+        email: resetForm.email.trim(),
+        code: resetCode.trim(),
+        password: resetForm.password,
+        password_confirm: resetForm.password_confirm
+      });
+
+      setLoginForm({ email: resetForm.email.trim(), password: "" });
+      setResetForm(createResetForm());
+      setResetCode("");
+      setResetStep("email");
+      setAuthMode("login");
+      setResetStatus({
+        loading: false,
+        error: "",
+        success: "Пароль обновлён. Войдите с новым паролем."
+      });
+    } catch (err) {
+      setResetStatus({
+        loading: false,
+        error: err.message || "Не удалось сбросить пароль.",
+        success: ""
+      });
+    }
+  };
+
+  const handlePasswordChangeField = (field) => (event) => {
+    setPasswordChangeForm((prev) => ({ ...prev, [field]: event.target.value }));
+    setPasswordChangeStatus((prev) => ({ ...prev, error: "", success: "" }));
+  };
+
+  const handlePasswordChange = async (event) => {
+    event.preventDefault();
+    setPasswordChangeStatus({ loading: true, error: "", success: "" });
+    try {
+      if (!passwordChangeForm.current_password) {
+        throw new Error("Введите текущий пароль.");
+      }
+      if (!passwordChangeForm.password || passwordChangeForm.password.length < 8) {
+        throw new Error("Новый пароль должен содержать минимум 8 символов.");
+      }
+      if (passwordChangeForm.password !== passwordChangeForm.password_confirm) {
+        throw new Error("Пароли не совпадают.");
+      }
+
+      await apiChangePassword(token, passwordChangeForm);
+      setPasswordChangeForm(createPasswordChangeForm());
+      setPasswordChangeStatus({
+        loading: false,
+        error: "",
+        success: "Пароль успешно изменён."
+      });
+      setToast({ visible: true, message: "Пароль успешно изменён.", type: "success" });
+      setPasswordChangeOpen(false);
+    } catch (err) {
+      setPasswordChangeStatus({
+        loading: false,
+        error: err.message || "Не удалось изменить пароль.",
         success: ""
       });
     }
@@ -1350,21 +1513,65 @@ export default function usePhoenixAppState() {
     handleLogout,
     authPageProps: {
       status,
-      portalLogin,
-      onPortalLoginChange: (value) => {
-        setPortalLogin(value);
-        setChallengeRequired(false);
-        setLoginCode("");
-      },
-      challengeRequired,
-      loginCode,
+      loginForm,
+      onLoginFormChange: handleLoginFormChange,
       onLogin: handleLogin,
-      onLoginCodeChange: setLoginCode,
+      authMode,
+      onAuthModeChange: setAuthMode,
       registrationForm,
+      registrationStep,
+      registrationCode,
+      onRegistrationCodeChange: (event) => setRegistrationCode(event.target.value),
       registrationStatus,
       publicDepartments,
       onRegistrationChange: handleRegistrationChange,
-      onRegisterByIin: handleRegisterByIin
+      onRegisterRequest: handleRegisterRequest,
+      onRegisterVerify: handleRegisterVerify,
+      onRegistrationBack: () => {
+        setRegistrationStep("form");
+        setRegistrationCode("");
+        setRegistrationStatus(createMessageState());
+      },
+      resetForm,
+      resetStep,
+      resetCode,
+      onResetFormChange: handleResetFormChange,
+      onResetCodeChange: (event) => setResetCode(event.target.value),
+      resetStatus,
+      onResetRequest: handleResetRequest,
+      onResetConfirm: handleResetConfirm,
+      onResetBack: () => {
+        setResetStep("email");
+        setResetCode("");
+        setResetStatus(createMessageState());
+      },
+      onOpenReset: () => {
+        setResetForm((prev) => ({ ...createResetForm(), email: loginForm.email || prev.email }));
+        setResetStep("email");
+        setResetCode("");
+        setResetStatus(createMessageState());
+      },
+      onBackToLogin: () => {
+        setRegistrationStep("form");
+        setRegistrationCode("");
+        setResetStep("email");
+        setResetCode("");
+        setRegistrationStatus(createMessageState());
+        setResetStatus(createMessageState());
+      }
+    },
+    passwordChangeProps: {
+      open: passwordChangeOpen,
+      onOpen: () => {
+        setPasswordChangeForm(createPasswordChangeForm());
+        setPasswordChangeStatus(createMessageState());
+        setPasswordChangeOpen(true);
+      },
+      onClose: () => setPasswordChangeOpen(false),
+      form: passwordChangeForm,
+      onChange: handlePasswordChangeField,
+      onSubmit: handlePasswordChange,
+      status: passwordChangeStatus
     },
     sidebarProps: {
       viewerFullName,

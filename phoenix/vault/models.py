@@ -62,7 +62,7 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     portal_login = models.CharField(max_length=64, unique=True)
     iin = models.CharField(max_length=12, unique=True, null=True, blank=True)
-    email = models.EmailField(blank=True)
+    email = models.EmailField(blank=True, null=True, unique=True)
     full_name = models.CharField(max_length=128, blank=True)
     role = models.CharField(max_length=16, choices=Role.choices, default=Role.EMPLOYEE)
     department = models.ForeignKey(
@@ -84,6 +84,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     def save(self, *args, **kwargs):
         if self.iin == "":
             self.iin = None
+        if self.email == "":
+            self.email = None
         super().save(*args, **kwargs)
 
     @property
@@ -233,6 +235,46 @@ class DepartmentShare(models.Model):
 
     def __str__(self):
         return f"{self.grantor.portal_login} -> {self.grantee.portal_login} ({self.department.name})"
+
+
+class EmailVerificationChallenge(models.Model):
+    class Purpose(models.TextChoices):
+        REGISTRATION = "registration", "Registration"
+        PASSWORD_RESET = "password_reset", "Password reset"
+
+    purpose = models.CharField(max_length=32, choices=Purpose.choices)
+    email = models.EmailField()
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="email_verification_challenges",
+    )
+    payload = models.JSONField(default=dict, blank=True)
+    code_digest = models.CharField(max_length=64)
+    salt = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    max_attempts = models.PositiveSmallIntegerField(default=5)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.purpose} challenge for {self.email}"
+
+    @property
+    def is_active(self):
+        return (
+            self.consumed_at is None
+            and self.attempts < self.max_attempts
+            and self.expires_at > timezone.now()
+        )
 
 
 class LoginChallenge(models.Model):

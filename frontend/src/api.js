@@ -33,21 +33,13 @@ function formatApiError(detail, fallbackMessage) {
   return messages.join("; ") || fallbackMessage;
 }
 
-export async function apiLogin(portalLogin, options = {}) {
-  const payload = { portal_login: portalLogin };
-  if (options.code) {
-    payload.code = options.code;
-  }
-  if (options.magicToken) {
-    payload.magic_token = options.magicToken;
-  }
-
+export async function apiLogin(email, password) {
   const response = await fetch(`${API_BASE}/auth/login/`, {
     method: "POST",
     headers: buildHeaders({
       "Content-Type": "application/json"
     }),
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ email, password })
   });
 
   if (!response.ok) {
@@ -82,6 +74,94 @@ export async function apiFetchPublicDepartments() {
   }
 
   return parseJsonResponse(response, "Ошибка загрузки отделов");
+}
+
+export async function apiRegisterRequest(payload) {
+  const response = await fetch(`${API_BASE}/auth/register/`, {
+    method: "POST",
+    headers: buildHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (response.status === 202) {
+    return parseJsonResponse(response, "Ошибка регистрации");
+  }
+
+  if (!response.ok) {
+    const detail = await parseJsonResponse(response, "Ошибка регистрации").catch(() => ({
+      detail: "Ошибка регистрации"
+    }));
+    throw new Error(formatApiError(detail, "Ошибка регистрации"));
+  }
+
+  return parseJsonResponse(response, "Ошибка регистрации");
+}
+
+export async function apiRegisterVerify(payload) {
+  const response = await fetch(`${API_BASE}/auth/register/verify/`, {
+    method: "POST",
+    headers: buildHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const detail = await parseJsonResponse(response, "Ошибка подтверждения регистрации").catch(() => ({
+      detail: "Ошибка подтверждения регистрации"
+    }));
+    throw new Error(formatApiError(detail, "Ошибка подтверждения регистрации"));
+  }
+
+  return parseJsonResponse(response, "Ошибка подтверждения регистрации");
+}
+
+export async function apiPasswordResetRequest(email) {
+  const response = await fetch(`${API_BASE}/auth/password-reset/request/`, {
+    method: "POST",
+    headers: buildHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify({ email })
+  });
+
+  if (response.status === 202) {
+    return parseJsonResponse(response, "Ошибка сброса пароля");
+  }
+
+  if (!response.ok) {
+    const detail = await parseJsonResponse(response, "Ошибка сброса пароля").catch(() => ({
+      detail: "Ошибка сброса пароля"
+    }));
+    throw new Error(formatApiError(detail, "Ошибка сброса пароля"));
+  }
+
+  return parseJsonResponse(response, "Ошибка сброса пароля");
+}
+
+export async function apiPasswordResetConfirm(payload) {
+  const response = await fetch(`${API_BASE}/auth/password-reset/confirm/`, {
+    method: "POST",
+    headers: buildHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const detail = await parseJsonResponse(response, "Ошибка сброса пароля").catch(() => ({
+      detail: "Ошибка сброса пароля"
+    }));
+    throw new Error(formatApiError(detail, "Ошибка сброса пароля"));
+  }
+
+  return parseJsonResponse(response, "Ошибка сброса пароля");
+}
+
+export async function apiChangePassword(token, payload) {
+  return apiWrite("/auth/password/change/", token, "POST", payload, "Ошибка смены пароля");
 }
 
 export async function apiRegisterByIin(payload) {

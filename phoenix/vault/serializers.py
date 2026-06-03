@@ -1,7 +1,11 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from rest_framework import serializers
 
+from .auth_helpers import derive_portal_login, normalize_email, verify_employee_active_by_iin
 from .employee_registry import EmployeeRegistryError, fetch_employee_identity_by_iin
 from .models import (
     AccessRequest,
@@ -190,6 +194,124 @@ class IinRegistrationSerializer(serializers.Serializer):
             is_active=True,
         )
         return {"user": user}
+
+
+class RegistrationRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    iin = serializers.CharField(max_length=12)
+    department_id = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.filter(is_active=True),
+        source="department",
+        write_only=True,
+    )
+    password = serializers.CharField(write_only=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_email(self, value):
+        normalized = normalize_email(value)
+        if User.objects.filter(email__iexact=normalized).exists():
+            raise serializers.ValidationError("Пользователь с такой почтой уже зарегистрирован.")
+        return normalized
+
+    def validate_iin(self, value):
+        normalized = str(value or "").strip()
+        if not normalized.isdigit() or len(normalized) != 12:
+            raise serializers.ValidationError("ИИН должен состоять из 12 цифр.")
+        if User.objects.filter(iin=normalized).exists():
+            raise serializers.ValidationError("Пользователь с таким ИИН уже зарегистрирован.")
+        return normalized
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "Пароли не совпадают."})
+        try:
+            validate_password(attrs["password"])
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
+
+        try:
+            identity = fetch_employee_identity_by_iin(attrs["iin"])
+        except EmployeeRegistryError:
+            raise serializers.ValidationError(
+                {"iin": "Не удалось проверить сотрудника. Попробуйте позже."}
+            ) from None
+        if identity is None:
+            raise serializers.ValidationError({"iin": "Сотрудник с таким ИИН не найден."})
+        if not identity.get("is_active"):
+            raise serializers.ValidationError({"iin": "Сотрудник не активен."})
+
+        attrs["identity"] = identity
+        attrs["portal_login"] = derive_portal_login(attrs["email"])
+        return attrs
+
+    def build_payload(self):
+        attrs = self.validated_data
+        identity = attrs["identity"]
+        department = attrs["department"]
+        return {
+            "email": attrs["email"],
+            "iin": identity["iin"],
+            "full_name": identity["full_name"],
+            "department_id": department.id,
+            "portal_login": attrs["portal_login"],
+            "password_hash": make_password(attrs["password"]),
+        }
+
+
+class RegistrationVerifySerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+
+    def validate_email(self, value):
+        return normalize_email(value)
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        normalized = normalize_email(value)
+        if not User.objects.filter(email__iexact=normalized, is_active=True).exists():
+            raise serializers.ValidationError("Пользователь с такой почтой не найден.")
+        return normalized
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+    password = serializers.CharField(write_only=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_email(self, value):
+        return normalize_email(value)
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "Пароли не совпадают."})
+        try:
+            validate_password(attrs["password"])
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
+        return attrs
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True, min_length=8)
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "Пароли не совпадают."})
+        try:
+            validate_password(attrs["password"])
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
+
+        user = self.context["request"].user
+        if not user.check_password(attrs["current_password"]):
+            raise serializers.ValidationError({"current_password": "Текущий пароль указан неверно."})
+        return attrs
 
 
 class ServiceSerializer(serializers.ModelSerializer):

@@ -18,21 +18,37 @@
 
 ## Update 2026-06-02 (IIN Registration)
 - Added `User.iin` as an optional unique employee identifier.
-- Added public registration endpoint `/api/auth/register-iin/`.
+- Added public registration endpoint `/api/auth/register-iin/` (now legacy, kept for backward compatibility).
 - Added public active department list endpoint `/api/public/departments/`.
 - IIN registration now verifies employees through the Avatracker API and stores only the required identity fields (`iin`, `full_name`, active status check).
-- Department heads no longer create users through the API; employees self-register by IIN, while superusers can still manage users through Django admin/API.
+- Department heads no longer create users through the API; employees self-register, while superusers can still manage users through Django admin/API.
+
+## Update 2026-06-03 (Email Auth Flow)
+- Primary authentication is now **email + password**. `User.email` is unique and nullable; empty strings are normalized to `NULL`.
+- Two-step **email registration**:
+  - `POST /api/auth/register/` validates email/IIN/department/password, verifies the employee against Avatracker (`active=true`), and emails a 6-digit code. Pending account data is stored in `EmailVerificationChallenge.payload` (no account is created yet).
+  - `POST /api/auth/register/verify/` confirms the code and creates the active `employee` account. `portal_login` is derived automatically from the email local-part.
+- **Login active-check**: on email + password login, the backend re-queries Avatracker by the user's IIN. `active=false` returns `403`; registry unavailable returns `503`.
+- **Password reset** by emailed code: `POST /api/auth/password-reset/request/` then `POST /api/auth/password-reset/confirm/`.
+- **Password change** for authenticated users requiring the current password: `POST /api/auth/password/change/`.
+- New model `EmailVerificationChallenge` (purpose `registration` / `password_reset`), code stored as salted SHA-256 digest, attempt-limited and TTL-bound (`VERIFICATION_CHALLENGE_TTL_MINUTES`, default 15).
+- New helper module `phoenix/vault/auth_helpers.py` (email normalization, `portal_login` derivation, Avatracker active-check helpers).
+- `AVATRACKER_AUTH_SCHEME` default changed to `Bearer` (Avatracker rejects the previous `Token` scheme with `401`).
+- New migration `0011_email_auth_flow` (email uniqueness backfill + `EmailVerificationChallenge`).
 
 ## 1. Purpose
 Phoenix backend is a Django + DRF service for:
 - managing employee access to company services;
-- storing per-user service credentials (login/password);
-- enforcing visibility rules (user sees only own services/credentials);
+- storing per-user service credentials (login/password, SSH key, API token);
+- enforcing department-scoped visibility rules;
 - logging sensitive actions.
 
 Core business roles:
-- `admin`: creates users, assigns accesses, manages credentials.
-- `employee`: read-only access to own data.
+- `is_superuser`: full system visibility and control (Django admin + API).
+- `head`: manages employees in their department, reviews access requests, manages department credentials, can receive cross-department read-only via `DepartmentShare`.
+- `employee`: read-only access to own assigned services and credentials; can self-register and request access.
+
+> The legacy `admin` role string is treated as `head` where it still appears; there is no separate `admin` business role.
 
 ---
 
@@ -75,11 +91,20 @@ Main file: `phoenix/phoenix/settings.py`
 - Default permission: authenticated users only
 - Custom auth backend:
   - `vault.auth_backends.PortalLoginBackend`
-  - fallback `ModelBackend`
+  - fallback `ModelBackend` (used for email + password verification)
 - CSRF trusted origins for frontend dev host
 - Passwordless mode controlled by:
   - `ALLOW_PASSWORDLESS_LOGIN`
   - `PASSWORDLESS_ROLES`
+- Email/SMTP for verification codes and notifications:
+  - `EMAIL_NOTIFICATIONS_ENABLED` (gate: if `False`, mail is only logged, not sent)
+  - `EMAIL_BACKEND`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`
+  - `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `DEFAULT_FROM_EMAIL`
+- Challenge TTLs:
+  - `LOGIN_CHALLENGE_TTL_MINUTES` (login OTP / magic token)
+  - `VERIFICATION_CHALLENGE_TTL_MINUTES` (registration / password reset codes)
+- Employee registry (Avatracker):
+  - `AVATRACKER_EMPLOYEE_URL`, `AVATRACKER_API_TOKEN`, `AVATRACKER_AUTH_SCHEME` (default `Bearer`), `AVATRACKER_TIMEOUT_SECONDS`
 
 Encryption-related env settings:
 - symmetric fallback:
@@ -99,21 +124,23 @@ Main file: `phoenix/vault/models.py`
 Custom auth entity.
 
 Fields:
-- `portal_login` (unique)
-- `iin` (unique, optional; used by public IIN registration)
-- `email`
+- `portal_login` (unique; derived automatically from email local-part on registration)
+- `iin` (unique, optional; populated from Avatracker)
+- `email` (unique, nullable; primary login identifier; empty string normalized to `NULL`)
 - `full_name`
-- `role` (`admin` / `employee`)
+- `role` (`head` / `employee`; super-admin is Django `is_superuser`)
+- `department_id` (nullable FK -> `vault_department`)
 - `is_active`
 - `is_staff`
+- `is_superuser`
 - `date_joined`
 - inherited auth fields: `password`, `last_login`, permissions relations
 
 Rules:
-- login identity is `portal_login`.
+- `USERNAME_FIELD = "portal_login"`, but day-to-day login uses **email + password**.
 
-### 5.2 `Category` (`vault_category`)
-Service grouping.
+### 5.2 `Department` (`vault_department`)
+Organizational unit; scopes visibility and ownership.
 
 Fields:
 - `name` (unique)
@@ -127,7 +154,7 @@ External/internal service descriptor.
 Fields:
 - `name`
 - `url`
-- `category_id` (nullable FK to `Category`)
+- `department_id` (nullable FK to `Department`)
 - `is_active`
 - `created_at`
 
@@ -148,13 +175,15 @@ Constraints:
 - unique `(user_id, service_id)`.
 
 ### 5.5 `Credential` (`vault_credential`)
-Per-user per-service credential pair.
+Per-user per-service credential. Supports password, SSH key, and API token secret types.
 
 Fields:
 - `user_id` FK -> `vault_user`
 - `service_id` FK -> `vault_service`
 - `login`
-- `password` (`EncryptedTextField`)
+- `secret_type` (`password` / `ssh_key` / `api_token`)
+- `secret_filename`, `ssh_host`, `ssh_port`, `ssh_algorithm`, `ssh_public_key`, `ssh_fingerprint`
+- `password` (`EncryptedTextField`; holds the encrypted secret regardless of type)
 - `notes`
 - `is_active`
 - `created_at`
@@ -163,18 +192,69 @@ Fields:
 Constraints:
 - unique `(user_id, service_id)`.
 
-### 5.6 `AuditLog` (`vault_auditlog`)
-Action tracking.
+### 5.6 `DepartmentShare` (`vault_departmentshare`)
+Grants a user read-only visibility into another department.
 
 Fields:
-- `actor_id` FK -> `vault_user` (nullable, `SET_NULL`)
-- `action` (`create`, `update`, `view`, `disable`, `enable`, `login`)
-- `object_type`
-- `object_id`
-- `metadata` (JSON)
+- `department_id` FK -> `vault_department`
+- `grantor_id` FK -> `vault_user`
+- `grantee_id` FK -> `vault_user`
+- `expires_at`
+- `is_active`
+- `created_at`, `updated_at`
+
+Constraints:
+- unique `(department_id, grantor_id, grantee_id)`.
+
+### 5.7 `AccessRequest` (`vault_accessrequest`)
+Employee-initiated request for access to a service.
+
+Fields:
+- `requester_id` FK -> `vault_user`
+- `service_id` FK -> `vault_service`
+- `status` (`pending` / `approved` / `rejected` / `canceled`)
+- `justification`
+- `reviewer_id` FK -> `vault_user` (nullable, `SET_NULL`)
+- `review_comment`
+- `requested_at`, `reviewed_at`
+
+### 5.8 `CredentialVersion` (`vault_credentialversion`)
+History snapshot of a credential.
+
+Fields:
+- `credential_id` FK -> `vault_credential`
+- `version`
+- credential snapshot fields (`login`, secret metadata, encrypted `password`, `notes`, `is_active`)
+- `change_type` (`create` / `update` / `disable` / `rotate`)
+- `changed_by_id` FK -> `vault_user` (nullable, `SET_NULL`)
 - `created_at`
 
-### 5.7 DRF Token (`authtoken_token`)
+Constraints:
+- unique `(credential_id, version)`.
+
+### 5.9 `LoginChallenge` (`vault_loginchallenge`)
+Optional 2-step login (OTP / magic token).
+
+Fields:
+- `user_id` FK -> `vault_user`
+- `channel` (`email`)
+- `code_digest`, `magic_token_digest`, `salt`
+- `expires_at`, `consumed_at`, `attempts`, `max_attempts`
+- `ip_address`, `user_agent`, `created_at`
+
+### 5.10 `EmailVerificationChallenge` (`vault_emailverificationchallenge`)
+Backs email registration and password reset.
+
+Fields:
+- `purpose` (`registration` / `password_reset`)
+- `email`
+- `user_id` FK -> `vault_user` (nullable; account may not exist yet during registration)
+- `payload` (JSON; pending account data for registration)
+- `code_digest`, `salt`
+- `expires_at`, `consumed_at`, `attempts`, `max_attempts`
+- `ip_address`, `user_agent`, `created_at`
+
+### 5.11 DRF Token (`authtoken_token`)
 One token per user for API auth.
 
 ---
@@ -184,9 +264,13 @@ See:
 - `er_diagram.md`
 
 Core relationships:
-- `Category 1 -> * Service`
+- `Department 1 -> * User`
+- `Department 1 -> * Service`
 - `User 1 -> * ServiceAccess * -> 1 Service`
 - `User 1 -> * Credential * -> 1 Service`
+- `Credential 1 -> * CredentialVersion`
+- `User 1 -> * AccessRequest * -> 1 Service`
+- `Department 1 -> * DepartmentShare` (grantor/grantee are users)
 - `User 0..1 -> * AuditLog`
 
 ---
@@ -234,7 +318,20 @@ If value is Fernet token (`gAAAAA...`):
 
 ## 8. Authentication and Authorization
 
-### 8.1 Login Backend
+### 8.1 Primary Flow: Email + Password
+File: `phoenix/vault/views.py` (`PortalLoginView`), `phoenix/vault/auth_helpers.py`
+
+Login (`POST /api/auth/login/`) accepts `email` + `password`:
+1. resolve active user by email (or `portal_login` if provided);
+2. verify password via `User.check_password`;
+3. re-check the employee in Avatracker by `iin`:
+   - `active=false` -> `403` (login forbidden);
+   - registry unavailable -> `503`;
+4. on success, issue/return a DRF token and write a `LOGIN` audit event.
+
+Registration is two-step and email-verified (see Update 2026-06-03). Password reset and password change follow the same emailed-code pattern; change additionally requires the current password.
+
+### 8.2 Login Backend (passwordless / challenge)
 File: `phoenix/vault/auth_backends.py`
 
 `PortalLoginBackend` behavior:
@@ -243,7 +340,9 @@ File: `phoenix/vault/auth_backends.py`
 - fetches active user by login;
 - allows auth only if user role is in `PASSWORDLESS_ROLES`.
 
-### 8.2 API Authentication
+When `LOGIN_CHALLENGE_ENABLED=True`, a passwordless attempt instead triggers a `LoginChallenge` (one-time code / magic token by email).
+
+### 8.3 API Authentication
 DRF uses:
 - `TokenAuthentication`
 
@@ -252,13 +351,12 @@ Frontend calls:
 - gets token
 - passes `Authorization: Token <key>` in subsequent requests.
 
-### 8.3 Permissions
+### 8.4 Permissions
 File: `phoenix/vault/permissions.py`
 
-- `IsCompanyAdmin`: authenticated admin only.
-- `IsCompanyAdminOrReadOnly`:
-  - safe methods (`GET/HEAD/OPTIONS`) for any authenticated user;
-  - write methods only for admin.
+- department-scoped rules: heads manage only their own department's employees; employees are read-only over their own data.
+- superusers have full access.
+- cross-department read-only is granted through active, non-expired `DepartmentShare` records.
 
 ---
 
@@ -266,40 +364,62 @@ File: `phoenix/vault/permissions.py`
 Routes file: `phoenix/vault/urls.py`
 Project URL mount: `phoenix/phoenix/urls.py` -> `/api/`
 
-### 9.1 Auth
+### 9.1 Auth and account
 - `POST /api/auth/login/`
-  - request: `portal_login` (required), `password` (optional)
-  - response: `token`, `portal_login`, `role`
-
+  - request: `email` + `password` (or `portal_login` for passwordless/challenge mode)
+  - response: `token`, `portal_login`, `role`, `is_superuser`, `full_name`, `department`
+  - `403` if the employee is inactive in Avatracker; `503` if the registry is unavailable
+- `POST /api/auth/register/`
+  - request: `email`, `iin`, `department_id`, `password`, `password_confirm`
+  - verifies the employee in Avatracker and emails a 6-digit code (`202`)
+- `POST /api/auth/register/verify/`
+  - request: `email`, `code`
+  - creates the active `employee` account (`201`)
+- `POST /api/auth/register-iin/` (legacy)
+  - direct IIN registration without email verification; kept for backward compatibility
+- `POST /api/auth/password-reset/request/`
+  - request: `email`; emails a reset code (`202`)
+- `POST /api/auth/password-reset/confirm/`
+  - request: `email`, `code`, `password`, `password_confirm`
+- `POST /api/auth/password/change/`
+  - authenticated; request: `current_password`, `password`, `password_confirm`
 - `GET /api/me/`
   - authenticated current user profile
+- `GET /api/config/public/`, `GET /api/public/departments/`
+  - unauthenticated bootstrap data for the auth screen
 
 ### 9.2 Users
 - `/api/users/` (`ModelViewSet`)
-  - admin-only
+  - heads manage their department's employees; superuser full access
   - `DELETE` = soft disable (`is_active=False`)
 
-### 9.3 Categories
-- `/api/categories/`
-  - admin: full CRUD and full queryset
-  - employee: read-only, filtered by accessible services
+### 9.3 Departments
+- `/api/departments/`
+  - department-scoped management; superuser full CRUD
 
 ### 9.4 Services
 - `/api/services/`
-  - admin: full CRUD
+  - head/superuser: manage
   - employee: read-only, filtered by active `ServiceAccess`
 
 ### 9.5 Access Links
 - `/api/accesses/`
-  - admin: full CRUD
+  - head/superuser: manage
   - employee: reads own active entries
   - `DELETE` = soft disable
 
 ### 9.6 Credentials
 - `/api/credentials/`
-  - admin: full CRUD
+  - head/superuser: manage
   - employee: read-only own active credentials and active service access
   - `DELETE` = soft disable
+  - secret download endpoint for SSH keys
+
+### 9.7 Workflow and audit
+- `/api/access-requests/` — create / approve / reject / cancel
+- `/api/department-shares/` — cross-department read-only grants
+- `/api/audit-logs/` — audit listing and CSV export
+- `/api/health/live/`, `/api/health/ready/` — runtime checks
 
 ---
 
@@ -312,8 +432,8 @@ Implemented business filtering:
   - `Credential.user == request.user`
   - credential active
   - service active
-  - category active or null
   - matching active `ServiceAccess`.
+- heads see their department; cross-department read-only is added through active `DepartmentShare` records.
 
 Audit logging in views:
 - create/update/disable for major entities
@@ -327,11 +447,12 @@ File: `phoenix/vault/serializers.py`
 
 - `UserSerializer` (read)
 - `UserWriteSerializer` (write, optional password)
-- `CategorySerializer`
-- `ServiceSerializer` (`category` read, `category_id` write)
+- `DepartmentSerializer`
+- `ServiceSerializer` (`department` read, `department_id` write)
 - `CredentialReadSerializer` (nested `user` and `service`)
 - `CredentialWriteSerializer`
 - `ServiceAccessSerializer` (`user/service` read + `user_id/service_id` write)
+- auth serializers: `RegistrationRequestSerializer`, `RegistrationVerifySerializer`, `PasswordResetRequestSerializer`, `PasswordResetConfirmSerializer`, `PasswordChangeSerializer`, `IinRegistrationSerializer` (legacy)
 
 ---
 
@@ -353,14 +474,14 @@ URL: `/admin/`
 File: `phoenix/vault/admin.py`
 
 Registered models:
-- `User`, `Category`, `Service`, `ServiceAccess`, `Credential`, `AuditLog`
+- `User`, `Department`, `Service`, `ServiceAccess`, `Credential`, `AuditLog`, and the request/share/challenge models.
 
 ### 13.2 Company Admin
 URL: `/company-admin/`
 File: `phoenix/vault/company_admin.py`
 
 Access gate:
-- only active users with `role=admin`.
+- only active company admins (`head` / superuser).
 
 Includes:
 - user/service/access/credential management
@@ -369,13 +490,15 @@ Includes:
 ---
 
 ## 14. Migrations and Schema Evolution
-Files:
-- `phoenix/vault/migrations/0001_initial.py`
-- `phoenix/vault/migrations/0002_serviceaccess.py`
+Migrations live in `phoenix/vault/migrations/` (`0001` … `0011`).
 
-Current model evolution:
-1. initial domain + custom user + credentials + audit.
-2. explicit `ServiceAccess` bridge added.
+Notable steps:
+1. `0001_initial` — initial domain + custom user + credentials + audit.
+2. `0002_serviceaccess` — explicit `ServiceAccess` bridge.
+3. `0003_department_role_rework` — `Department` model and `head`/`employee` roles.
+4. `0004`–`0008` — security hardening, SSH/API credential metadata, secret types.
+5. `0009_user_iin` — optional unique `User.iin`.
+6. `0011_email_auth_flow` — unique nullable `User.email` (with empty-string backfill) + `EmailVerificationChallenge`.
 
 ---
 
@@ -387,10 +510,13 @@ Main files:
 Critical runtime vars:
 - Django: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`
 - CSRF: `DJANGO_CSRF_TRUSTED_ORIGINS`
-- DB: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`
-- Auth mode: `ALLOW_PASSWORDLESS_LOGIN`, `PASSWORDLESS_ROLES`
-- Employee registry: `AVATRACKER_EMPLOYEE_URL`, `AVATRACKER_API_TOKEN`, `AVATRACKER_AUTH_SCHEME`, `AVATRACKER_TIMEOUT_SECONDS`
+- DB: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` (or `DATABASE_URL`)
+- Auth mode: `ALLOW_PASSWORDLESS_LOGIN`, `PASSWORDLESS_ROLES`, `LOGIN_CHALLENGE_ENABLED`, `LOGIN_CHALLENGE_TTL_MINUTES`, `VERIFICATION_CHALLENGE_TTL_MINUTES`
+- Email/SMTP: `EMAIL_NOTIFICATIONS_ENABLED`, `EMAIL_BACKEND`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `DEFAULT_FROM_EMAIL`
+- Employee registry: `AVATRACKER_EMPLOYEE_URL`, `AVATRACKER_API_TOKEN`, `AVATRACKER_AUTH_SCHEME` (default `Bearer`), `AVATRACKER_TIMEOUT_SECONDS`
 - Encryption: `FERNET_KEY`, `ASYMMETRIC_*`
+
+> Email codes (registration, password reset, login challenge) are only delivered when `EMAIL_NOTIFICATIONS_ENABLED=True`. Otherwise the message is written to logs, and in `DEBUG` the code is also returned in the API response as `debug_code` / `debug_magic_token`.
 
 Recommended key setup:
 - `ASYMMETRIC_PUBLIC_KEY_PATH=keys/public_key.pem`
@@ -435,21 +561,24 @@ Expected:
 
 Current design strengths:
 - per-user credential isolation by queryset filtering;
+- email + password auth with hashed passwords and Django password validators;
+- live employee active-status enforcement against Avatracker on login;
+- email-verified registration and password reset (salted, attempt-limited, TTL-bound codes);
 - token auth (stateless API usage);
 - encrypted credential storage with asymmetric option;
 - action auditing.
 
 Current risks and improvements:
-- passwordless login for admins is enabled by default in `.env`.
-- `makemigrations` in container startup is dev-only practice.
+- passwordless mode is still available via `ALLOW_PASSWORDLESS_LOGIN` and should stay off in production.
+- `makemigrations` in dev container startup is dev-only practice.
 - private key file lifecycle needs strict secret management.
-- project currently runs Django dev server in container.
+- dev `docker-compose.yml` runs the Django dev server; use `docker-compose.prod.yml` for production-like Gunicorn.
 
 Production recommendations:
-- disable passwordless for admins.
-- move to WSGI/ASGI server (`gunicorn`/`uvicorn`).
-- run only `migrate` at startup.
-- store private key in managed secret store, not repo path.
+- keep `ALLOW_PASSWORDLESS_LOGIN=False`;
+- configure real SMTP and `EMAIL_NOTIFICATIONS_ENABLED=True` so verification codes are delivered;
+- run only `migrate` at startup;
+- store private key in a managed secret store, not a repo path;
 - enable HTTPS termination and strict host settings.
 
 ---
@@ -466,17 +595,21 @@ If strict behavior is required:
 
 ## 19. Frontend Interaction (Backend View)
 Frontend uses:
-- `POST /api/auth/login/`
-- then token for all other calls.
+- auth screen: `POST /api/auth/register/`, `/register/verify/`, `/auth/login/`, `/password-reset/request/`, `/password-reset/confirm/`;
+- authenticated header action: `POST /api/auth/password/change/`;
+- then the DRF token for all other calls.
 
-Admin UI currently calls:
+Manager/superuser UI calls:
 - users CRUD
-- services list
+- departments / services
 - accesses CRUD
 - credentials CRUD
+- access-request review and department shares
+- audit logs + export
 
 Employee UI calls:
-- credentials list (filtered by backend security rules).
+- credentials list (filtered by backend security rules)
+- access-request creation.
 
 ---
 
@@ -486,6 +619,10 @@ Employee UI calls:
 - `phoenix/vault/models.py`
 - `phoenix/vault/encryption.py`
 - `phoenix/vault/auth_backends.py`
+- `phoenix/vault/auth_helpers.py`
+- `phoenix/vault/employee_registry.py`
+- `phoenix/vault/security.py`
+- `phoenix/vault/notifications.py`
 - `phoenix/vault/permissions.py`
 - `phoenix/vault/serializers.py`
 - `phoenix/vault/views.py`
@@ -494,10 +631,10 @@ Employee UI calls:
 - `phoenix/vault/admin.py`
 - `phoenix/vault/company_admin.py`
 - `phoenix/vault/forms.py`
-- `phoenix/vault/migrations/0001_initial.py`
-- `phoenix/vault/migrations/0002_serviceaccess.py`
+- `phoenix/vault/migrations/` (`0001` … `0011_email_auth_flow`)
 - `phoenix/vault/management/commands/wait_for_db.py`
 - `phoenix/vault/management/commands/generate_rsa_keypair.py`
 - `docker-compose.yml`
 - `Dockerfile`
 - `er_diagram.md`
+- `diagram_for_phoenix.md`

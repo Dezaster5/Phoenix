@@ -5,7 +5,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 
-from .models import LoginChallenge
+from .models import EmailVerificationChallenge, LoginChallenge
 
 
 def get_client_ip(request):
@@ -82,3 +82,64 @@ def verify_login_challenge(user, code=None, magic_token=None):
     challenge.consumed_at = timezone.now()
     challenge.save(update_fields=["consumed_at"])
     return True, challenge
+
+
+def _verification_ttl_minutes():
+    return getattr(settings, "VERIFICATION_CHALLENGE_TTL_MINUTES", 15)
+
+
+def generate_email_verification_challenge(purpose, email, payload=None, user=None, request=None):
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    salt = secrets.token_hex(16)
+    expires_at = timezone.now() + timedelta(minutes=_verification_ttl_minutes())
+    ip_address = get_client_ip(request) if request else None
+    user_agent = get_user_agent(request) if request else ""
+
+    EmailVerificationChallenge.objects.filter(
+        purpose=purpose,
+        email=email,
+        consumed_at__isnull=True,
+        expires_at__gt=timezone.now(),
+    ).update(consumed_at=timezone.now())
+
+    challenge = EmailVerificationChallenge.objects.create(
+        purpose=purpose,
+        email=email,
+        user=user,
+        payload=payload or {},
+        code_digest=_digest(code, salt),
+        salt=salt,
+        expires_at=expires_at,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    return challenge, code
+
+
+def verify_email_verification_challenge(purpose, email, code):
+    challenge = (
+        EmailVerificationChallenge.objects.filter(
+            purpose=purpose,
+            email=email,
+            consumed_at__isnull=True,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if challenge is None:
+        return False, "Challenge not found."
+    if not challenge.is_active:
+        return False, "Challenge is expired or exhausted."
+    if not code:
+        return False, "Code is required."
+
+    is_valid = _digest(str(code).strip(), challenge.salt) == challenge.code_digest
+    if not is_valid:
+        challenge.attempts += 1
+        challenge.save(update_fields=["attempts"])
+        return False, "Invalid challenge."
+
+    challenge.consumed_at = timezone.now()
+    challenge.save(update_fields=["consumed_at"])
+    return True, challenge
+

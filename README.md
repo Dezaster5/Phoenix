@@ -19,7 +19,9 @@ Phoenix Vault supports three practical operating roles:
 Core product capabilities:
 - credential storage with encrypted secret values;
 - audit log with actor, IP, user agent, object, and action;
-- self-registration by IIN with duplicate-IIN and duplicate-login protection;
+- email-verified self-registration (email + IIN + department + password, confirmed by an emailed code), with Avatracker employee verification and duplicate protection;
+- email + password login with a live Avatracker active-status check (inactive employees are blocked);
+- password reset by emailed code and authenticated password change (current password required);
 - access request workflow: create / approve / reject / cancel;
 - credential version history;
 - optional login challenge using one-time code or magic token;
@@ -56,9 +58,10 @@ Core product capabilities:
 ## Main Features
 
 ### Identity and access model
-- custom user identity based on `portal_login`;
-- public employee registration by IIN through the Avatracker employee registry;
-- department-scoped RBAC;
+- custom user identity (`portal_login` derived from email), primary login by **email + password**;
+- email-verified self-registration with employee validation against the Avatracker registry;
+- live employee active-status enforcement on login;
+- department-scoped RBAC (`employee` / `head` / superuser);
 - read-only department sharing for cross-functional visibility.
 
 ### Secrets and credentials
@@ -172,9 +175,12 @@ DJANGO_DEBUG=False
 ALLOW_PASSWORDLESS_LOGIN=False
 PASSWORDLESS_ROLES=employee
 LOGIN_CHALLENGE_ENABLED=True
+EMAIL_NOTIFICATIONS_ENABLED=True
 COLLECT_STATIC=1
 WEB_CONCURRENCY=2
 ```
+
+Email + password is the primary login path; `EMAIL_NOTIFICATIONS_ENABLED=True` plus real SMTP is required so registration and password-reset codes are actually delivered.
 
 ### 2. Start the stack
 ```bash
@@ -342,16 +348,24 @@ VITE_API_URL=https://your-backend.example.com/api
 - `PASSWORDLESS_ROLES`
 - `LOGIN_CHALLENGE_ENABLED`
 - `LOGIN_CHALLENGE_TTL_MINUTES`
+- `VERIFICATION_CHALLENGE_TTL_MINUTES` — TTL for registration / password-reset email codes (default `15`)
 
-Important auth behavior:
-- direct login without challenge is restricted to configured `PASSWORDLESS_ROLES`;
-- superusers are not allowed to bypass challenge through the direct passwordless path;
-- when challenge mode is enabled, active users authenticate through one-time code / magic token flow.
+Primary auth behavior:
+- login is **email + password**; on success the backend re-checks the employee in Avatracker by IIN and blocks inactive employees (`403`), or returns `503` if the registry is unavailable;
+- registration is two-step: `POST /api/auth/register/` (sends an email code) then `POST /api/auth/register/verify/` (creates the account);
+- password reset uses an emailed code; password change requires the current password;
+- the passwordless / one-time-code login challenge remains available via `ALLOW_PASSWORDLESS_LOGIN` / `LOGIN_CHALLENGE_ENABLED` and should stay off in production.
 
-### Employee registry / IIN registration
+### Email / SMTP
+- `EMAIL_NOTIFICATIONS_ENABLED` — when `False`, emails (verification codes, notifications) are only logged, not sent;
+- `EMAIL_BACKEND`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `DEFAULT_FROM_EMAIL`.
+
+For Gmail SMTP: host `smtp.gmail.com`, port `587`, `EMAIL_USE_TLS=True`, and an **App Password** (not the account password) in `EMAIL_HOST_PASSWORD`. In `DEBUG` the code is also returned in the API response as `debug_code` for local testing.
+
+### Employee registry / registration
 - `AVATRACKER_EMPLOYEE_URL` — endpoint template, default: `https://avatracker.online/api/v1/employees/{iin}`
 - `AVATRACKER_API_TOKEN` — token used by the backend to query the registry
-- `AVATRACKER_AUTH_SCHEME` — authorization scheme, default: `Token`
+- `AVATRACKER_AUTH_SCHEME` — authorization scheme, default: `Bearer` (Avatracker rejects `Token` with `401`)
 - `AVATRACKER_TIMEOUT_SECONDS` — registry request timeout, default: `5`
 
 Registration uses only the registry fields required by Phoenix:
@@ -359,7 +373,7 @@ Registration uses only the registry fields required by Phoenix:
 - `full_name`
 - `active`
 
-If the IIN is not found, inactive, already registered, or the chosen login is already used, registration is rejected.
+If the IIN is not found, inactive, already registered, or the chosen email/login is already used, registration is rejected.
 
 ### Public operational config exposed to frontend
 - `PUBLIC_SUPPORT_EMAIL`
@@ -389,9 +403,8 @@ If the IIN is not found, inactive, already registered, or the chosen login is al
 
 - do not commit `.env` files or private keys;
 - without the RSA private key, `asym:v1` secrets cannot be decrypted;
-- in production, enable `LOGIN_CHALLENGE_ENABLED=True`;
+- configure real SMTP and set `EMAIL_NOTIFICATIONS_ENABLED=True` in production, otherwise registration and password-reset codes are never delivered;
 - in production, keep `ALLOW_PASSWORDLESS_LOGIN=False` unless you intentionally allow direct non-challenge login for selected roles;
-- configure SMTP if using email-based login challenge and notifications;
 - review `CONTENT_SECURITY_POLICY` before enabling a strict CSP in front of Swagger/admin.
 
 ## Testing
@@ -403,6 +416,9 @@ docker compose run --rm -e COLLECT_STATIC=0 web python manage.py test vault.test
 ```
 
 Current backend coverage includes:
+- email registration + verification flow;
+- email + password login with Avatracker active-status enforcement;
+- password reset and password change flows;
 - login challenge flow;
 - direct login policy for privileged roles;
 - access request workflow;

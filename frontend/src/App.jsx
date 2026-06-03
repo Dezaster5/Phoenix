@@ -5,6 +5,7 @@ import AppHeader from "./components/AppHeader";
 import AppSidebar from "./components/AppSidebar";
 import AuthPage from "./components/AuthPage";
 import NotFoundPage from "./components/NotFoundPage";
+import PasswordChangeDialog from "./components/PasswordChangeDialog";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ServicesPage from "./components/ServicesPage";
 import VaultPage from "./components/VaultPage";
@@ -42,6 +43,7 @@ export default function App() {
     toast,
     handleLogout,
     authPageProps,
+    passwordChangeProps,
     sidebarProps,
     vaultPageProps,
     servicesPageProps,
@@ -82,7 +84,11 @@ export default function App() {
         <span className="orb orb-three" />
       </div>
 
-      <AppHeader isAuthenticated={isAuthenticated} onLogout={handleLogout} />
+      <AppHeader
+        isAuthenticated={isAuthenticated}
+        onLogout={handleLogout}
+        onOpenPasswordChange={passwordChangeProps.onOpen}
+      />
 
       <Routes>
         <Route
@@ -149,6 +155,8 @@ export default function App() {
           {toast.message}
         </div>
       )}
+
+      <PasswordChangeDialog {...passwordChangeProps} />
     </div>
   );
 }

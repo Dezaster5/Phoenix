@@ -16,6 +16,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .auth_helpers import normalize_email, verify_user_employee_active
 from .models import (
     AccessRequest,
     AuditLog,
@@ -23,11 +24,19 @@ from .models import (
     CredentialVersion,
     Department,
     DepartmentShare,
+    EmailVerificationChallenge,
     Service,
     ServiceAccess,
 )
 from .notifications import send_platform_email
-from .security import generate_login_challenge, get_client_ip, get_user_agent, verify_login_challenge
+from .security import (
+    generate_email_verification_challenge,
+    generate_login_challenge,
+    get_client_ip,
+    get_user_agent,
+    verify_email_verification_challenge,
+    verify_login_challenge,
+)
 from .serializers import (
     AccessRequestReadSerializer,
     AccessRequestReviewSerializer,
@@ -39,6 +48,11 @@ from .serializers import (
     DepartmentSerializer,
     DepartmentShareSerializer,
     IinRegistrationSerializer,
+    PasswordChangeSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
+    RegistrationRequestSerializer,
+    RegistrationVerifySerializer,
     ServiceAccessSerializer,
     ServiceSerializer,
     UserSerializer,
@@ -189,25 +203,70 @@ def _parse_range_bound(value, is_end=False):
     return timezone.make_aware(dt_value, timezone.get_current_timezone())
 
 
+def _resolve_user_by_login(email="", portal_login=""):
+    normalized_email = normalize_email(email)
+    if normalized_email:
+        return (
+            User.objects.select_related("department")
+            .filter(email__iexact=normalized_email, is_active=True)
+            .first()
+        )
+    if portal_login:
+        return _resolve_portal_login_user(portal_login)
+    return None
+
+
+def _authenticate_with_password(user, password):
+    if not user or not password:
+        return None
+    if user.check_password(password):
+        return user
+    return None
+
+
+def _employee_registry_login_error(user):
+    if not user or not user.iin:
+        return None
+    registry_status = verify_user_employee_active(user)
+    if registry_status is None:
+        return Response(
+            {"detail": "Не удалось проверить статус сотрудника. Попробуйте позже."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if not registry_status:
+        return Response(
+            {"detail": "Вход запрещён: сотрудник не активен."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
 class PortalLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
     throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
 
     def post(self, request):
+        email = str(request.data.get("email", "")).strip()
         portal_login = str(request.data.get("portal_login", "")).strip()
         password = request.data.get("password")
         code = request.data.get("code")
         magic_token = request.data.get("magic_token")
 
-        if not portal_login:
-            return Response({"detail": "portal_login is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not email and not portal_login:
+            return Response({"detail": "email is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         challenge_enabled = False
+        user = None
+
         if password:
-            user = authenticate(request, username=portal_login, password=password)
+            candidate = _resolve_user_by_login(email=email, portal_login=portal_login)
+            user = _authenticate_with_password(candidate, password)
+            if user is None and portal_login and not email:
+                user = authenticate(request, username=portal_login, password=password)
         else:
-            user = _resolve_portal_login_user(portal_login)
+            login_value = portal_login or email
+            user = _resolve_portal_login_user(login_value) if portal_login else _resolve_user_by_login(email=email)
             if user is not None:
                 challenge_enabled = bool(getattr(settings, "LOGIN_CHALLENGE_ENABLED", False))
                 if not challenge_enabled and not _direct_passwordless_allowed(user):
@@ -215,6 +274,11 @@ class PortalLoginView(APIView):
 
         if user is None:
             return Response({"detail": "invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if password:
+            registry_error = _employee_registry_login_error(user)
+            if registry_error is not None:
+                return registry_error
 
         if challenge_enabled:
             if not code and not magic_token:
@@ -272,6 +336,200 @@ class PortalLoginView(APIView):
             request=request,
         )
         return Response(_build_auth_payload(user, token.key))
+
+
+class RegistrationRequestView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
+
+    def post(self, request):
+        serializer = RegistrationRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.build_payload()
+        email = payload["email"]
+
+        challenge, one_time_code = generate_email_verification_challenge(
+            EmailVerificationChallenge.Purpose.REGISTRATION,
+            email,
+            payload=payload,
+            request=request,
+        )
+
+        send_platform_email(
+            subject="Phoenix Vault: подтверждение регистрации",
+            body="\n".join(
+                [
+                    "Для завершения регистрации в Phoenix Vault введите код:",
+                    "",
+                    f"Код: {one_time_code}",
+                    "",
+                    f"Код действителен до: {challenge.expires_at.isoformat()}",
+                ]
+            ),
+            recipients=[email],
+        )
+
+        response_payload = {
+            "detail": "verification sent",
+            "verification_required": True,
+            "channel": "email",
+            "expires_at": challenge.expires_at,
+        }
+        if settings.DEBUG:
+            response_payload["debug_code"] = one_time_code
+        return Response(response_payload, status=status.HTTP_202_ACCEPTED)
+
+
+class RegistrationVerifyView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
+
+    def post(self, request):
+        serializer = RegistrationVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        code = serializer.validated_data["code"]
+
+        valid, result = verify_email_verification_challenge(
+            EmailVerificationChallenge.Purpose.REGISTRATION,
+            email,
+            code,
+        )
+        if not valid:
+            return Response({"detail": "Неверный или просроченный код."}, status=status.HTTP_400_BAD_REQUEST)
+
+        challenge = result
+        payload = challenge.payload or {}
+        department_id = payload.get("department_id")
+        department = Department.objects.filter(id=department_id, is_active=True).first()
+        if department is None:
+            return Response({"detail": "Отдел недоступен для регистрации."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if User.objects.filter(email__iexact=email).exists() or User.objects.filter(iin=payload.get("iin")).exists():
+            return Response({"detail": "Пользователь уже зарегистрирован."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User(
+            portal_login=payload["portal_login"],
+            email=email,
+            iin=payload.get("iin"),
+            full_name=payload.get("full_name", ""),
+            role=User.Role.EMPLOYEE,
+            department=department,
+            is_active=True,
+        )
+        user.password = payload["password_hash"]
+        user.save()
+
+        log_action(
+            actor=None,
+            action=AuditLog.Action.CREATE,
+            obj=user,
+            metadata={"source": "email_registration", "department_id": user.department_id},
+            request=request,
+        )
+        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+
+        challenge, one_time_code = generate_email_verification_challenge(
+            EmailVerificationChallenge.Purpose.PASSWORD_RESET,
+            email,
+            user=user,
+            request=request,
+        )
+
+        send_platform_email(
+            subject="Phoenix Vault: сброс пароля",
+            body="\n".join(
+                [
+                    "Для сброса пароля Phoenix Vault введите код:",
+                    "",
+                    f"Код: {one_time_code}",
+                    "",
+                    f"Код действителен до: {challenge.expires_at.isoformat()}",
+                ]
+            ),
+            recipients=[email],
+        )
+
+        response_payload = {
+            "detail": "verification sent",
+            "verification_required": True,
+            "channel": "email",
+            "expires_at": challenge.expires_at,
+        }
+        if settings.DEBUG:
+            response_payload["debug_code"] = one_time_code
+        return Response(response_payload, status=status.HTTP_202_ACCEPTED)
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        code = serializer.validated_data["code"]
+        password = serializer.validated_data["password"]
+
+        valid, result = verify_email_verification_challenge(
+            EmailVerificationChallenge.Purpose.PASSWORD_RESET,
+            email,
+            code,
+        )
+        if not valid:
+            return Response({"detail": "Неверный или просроченный код."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+        if user is None:
+            return Response({"detail": "Пользователь не найден."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(password)
+        user.save(update_fields=["password"])
+        log_action(
+            actor=user,
+            action=AuditLog.Action.UPDATE,
+            object_type="User",
+            object_id=str(user.pk),
+            metadata={"action": "password_reset"},
+            request=request,
+        )
+        return Response({"detail": "password updated"})
+
+
+class PasswordChangeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PasswordChangeSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        user.set_password(serializer.validated_data["password"])
+        user.save(update_fields=["password"])
+        log_action(
+            actor=user,
+            action=AuditLog.Action.UPDATE,
+            object_type="User",
+            object_id=str(user.pk),
+            metadata={"action": "password_change"},
+            request=request,
+        )
+        return Response({"detail": "password updated"})
 
 
 class HealthLiveView(APIView):

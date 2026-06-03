@@ -1,68 +1,93 @@
 ```mermaid
 flowchart LR
-  E["Сотрудник ReadOnly"]
-  A["Админ Phoenix Admin"]
+  E["Сотрудник (employee, ReadOnly)"]
+  H["Руководитель отдела (head)"]
+  A["Супер-админ (is_superuser)"]
   D["Django Admin (dev only)"]
 
-  Mail["Почта Email"]
+  Mail["Почта (Email / SMTP)"]
+  Reg["Avatracker (реестр сотрудников)"]
   Ext["Внешние сервисы (Ads, CRM, Analytics)"]
 
-  subgraph P["Phoenix"]
+  subgraph P["Phoenix Vault"]
     direction TB
 
     subgraph Auth["Аутентификация и доступ"]
-      L1["Вход по уникальному логину"]
-      L2["Сессия пользователя"]
-      ACL["RBAC контроль видимости (Admin / ReadOnly)"]
+      R1["Регистрация: email + ИИН + отдел + пароль"]
+      R2["Проверка сотрудника в Avatracker (active=true)"]
+      R3["Код подтверждения на почту"]
+      L1["Вход по email + паролю"]
+      L2["Повторная проверка active по ИИН при входе"]
+      PR["Сброс пароля по коду из почты"]
+      PC["Смена пароля (нужен текущий пароль)"]
+      ACL["RBAC видимость (employee / head / superuser)"]
+      TOK["DRF токен"]
     end
 
-    subgraph AdminPanel["Админ панель Phoenix (не Django Admin)"]
-      U1["Создать сотрудника (логин Phoenix)"]
+    subgraph ManagerUI["Панель руководителя / супер-админа"]
       U2["Назначить сервисы сотруднику"]
-      U3["Добавить или обновить креды (логин/пароль)"]
-      U4["Категории сервисов"]
+      U3["Добавить или обновить креды (пароль/SSH/API-токен)"]
+      U4["Отделы (Department)"]
       U5["Отключить доступ сотрудника"]
       U6["Ротация или замена паролей"]
+      U7["Заявки на доступ: approve / reject"]
+      U8["Межотдельский read-only (DepartmentShare)"]
     end
 
     subgraph EmpUI["UI сотрудника"]
       V1["Список доступных сервисов (ссылки)"]
-      V2["Категории сервисов"]
-      V3["Просмотр логина и пароля к сервису"]
+      V3["Просмотр логина и секрета к сервису"]
+      V4["Создать заявку на доступ"]
     end
 
     subgraph Data["Хранилище"]
       DB1[(Users)]
       DB2[(Services)]
       DB3[(Credentials: user x service)]
-      DB4[(Categories)]
-      AUD[(Audit log)]
+      DB4[(Departments)]
+      DB5[(AccessRequests)]
+      DB6[(CredentialVersions)]
+      EVC[(EmailVerificationChallenge)]
+      AUD[(AuditLog)]
     end
   end
 
-  E -->|"1 Запрос доступа"| Mail
-  Mail -->|"2 Передать запрос"| A
-  A -->|"3 Создать логин Phoenix"| U1
-  U1 --> DB1
-  A -->|"4 Отправить логин"| Mail
-  Mail -->|"5 Получить логин"| E
+  E -->|"1 Заполнить форму регистрации"| R1
+  R1 -->|"2 Проверить ИИН"| R2 --> Reg
+  R2 -->|"3 Отправить код"| R3 --> Mail
+  Mail -->|"4 Код сотруднику"| E
+  E -->|"5 Ввести код"| R3
+  R3 -->|"6 Создать аккаунт"| DB1
+  R1 --> EVC
+  R3 --> EVC
 
-  A -->|"6 Каталог сервисов"| DB2
-  A --> U4 --> DB4
-  A -->|"7 Назначить сервисы"| U2 --> DB3
-  A -->|"8 Внести креды"| U3 --> DB3
-  U3 --> AUD
-  U6 --> DB3
-  U5 --> DB3
-
-  E -->|"9 Вход"| L1 --> L2
-  L2 --> ACL
+  E -->|"7 Вход email+пароль"| L1 --> L2
+  L2 -->|"проверка active"| Reg
+  L2 --> TOK --> ACL
   ACL --> V1
-  V2 --> DB4
   V1 --> DB3
-  E -->|"10 Открыть сервис"| V1 --> Ext
-  E -->|"11 Смотреть креды"| V3 --> DB3
+  E -->|"8 Открыть сервис"| V1 --> Ext
+  E -->|"9 Смотреть креды"| V3 --> DB3
   V3 --> AUD
+  E -->|"10 Запросить доступ"| V4 --> DB5
+
+  E -.->|"Забыл пароль"| PR --> Mail
+  E -.->|"Сменить пароль"| PC --> DB1
+
+  H -->|"Разобрать заявки"| U7 --> DB5
+  H --> U2 --> DB3
+  H --> U3 --> DB3
+  H --> U4 --> DB4
+  H --> U5 --> DB3
+  H --> U6 --> DB3
+  H --> U8
+  U3 --> DB6
+  U6 --> DB6
+  A --> ManagerUI
+
+  L1 --> AUD
+  U2 --> AUD
+  U7 --> AUD
 
   D -.-> P
 ```

@@ -3,7 +3,8 @@ erDiagram
     USER {
         bigint id PK
         varchar portal_login UK
-        varchar email
+        varchar iin UK
+        varchar email UK
         varchar full_name
         varchar role
         bigint department_id FK
@@ -115,6 +116,23 @@ erDiagram
         datetime created_at
     }
 
+    EMAIL_VERIFICATION_CHALLENGE {
+        bigint id PK
+        varchar purpose
+        varchar email
+        bigint user_id FK
+        json payload
+        varchar code_digest
+        varchar salt
+        datetime expires_at
+        datetime consumed_at
+        int attempts
+        int max_attempts
+        inet ip_address
+        varchar user_agent
+        datetime created_at
+    }
+
     AUTH_TOKEN {
         varchar key PK
         bigint user_id FK
@@ -143,11 +161,16 @@ erDiagram
 
     USER o|--o{ AUDIT_LOG : acts_as_actor
     USER ||--o{ LOGIN_CHALLENGE : login_challenges
+    USER o|--o{ EMAIL_VERIFICATION_CHALLENGE : verifications
     USER ||--|| AUTH_TOKEN : authenticates
 ```
 
 Notes:
+- `USER.email` is unique and nullable (`NULL` allowed, empty string normalized to `NULL`); it is the primary login identifier for email + password authentication.
+- `USER.iin` is unique and nullable; populated from the Avatracker employee registry during registration.
 - `SERVICE_ACCESS` and `CREDENTIAL` enforce unique `(user_id, service_id)`.
 - `DEPARTMENT_SHARE` enforces unique `(department_id, grantor_id, grantee_id)`.
 - `CREDENTIAL_VERSION` enforces unique `(credential_id, version)`.
 - `CREDENTIAL.password_encrypted` stored via `EncryptedTextField` (asymmetric envelope encryption if configured).
+- `EMAIL_VERIFICATION_CHALLENGE` backs email registration and password reset. `purpose` is `registration` or `password_reset`; for registration the pending account data is held in `payload` until the code is confirmed. `user_id` is nullable because the account may not exist yet at registration time.
+- `LOGIN_CHALLENGE` backs the optional one-time-code / magic-token login challenge and is independent from `EMAIL_VERIFICATION_CHALLENGE`.
