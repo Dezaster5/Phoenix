@@ -28,6 +28,9 @@ def _send_via_resend(subject, body, recipients):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            # Cloudflare (in front of api.resend.com) blocks the default
+            # urllib User-Agent with HTTP 403 / error 1010. Send an explicit one.
+            "User-Agent": "Mozilla/5.0 (compatible; PhoenixVault/1.0; +https://phoenix-vault)",
         },
         method="POST",
     )
