@@ -176,11 +176,19 @@ ALLOW_PASSWORDLESS_LOGIN=False
 PASSWORDLESS_ROLES=employee
 LOGIN_CHALLENGE_ENABLED=True
 EMAIL_NOTIFICATIONS_ENABLED=True
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.mail.ru
+EMAIL_PORT=465
+EMAIL_HOST_USER=info@avtch.io
+EMAIL_HOST_PASSWORD=<mail.ru app password>
+EMAIL_USE_TLS=False
+EMAIL_USE_SSL=True
+DEFAULT_FROM_EMAIL=info@avtch.io
 COLLECT_STATIC=1
 WEB_CONCURRENCY=2
 ```
 
-Email + password is the primary login path; `EMAIL_NOTIFICATIONS_ENABLED=True` plus real SMTP is required so registration and password-reset codes are actually delivered.
+Email + password is the primary login path; `EMAIL_NOTIFICATIONS_ENABLED=True` plus real SMTP is required so registration and password-reset codes are actually delivered from `info@avtch.io`.
 
 ### 2. Start the stack
 ```bash
@@ -360,7 +368,7 @@ Primary auth behavior:
 - `EMAIL_NOTIFICATIONS_ENABLED` — when `False`, emails (verification codes, notifications) are only logged, not sent;
 - `EMAIL_BACKEND`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `DEFAULT_FROM_EMAIL`.
 
-For Gmail SMTP: host `smtp.gmail.com`, port `587`, `EMAIL_USE_TLS=True`, and an **App Password** (not the account password) in `EMAIL_HOST_PASSWORD`. In `DEBUG` the code is also returned in the API response as `debug_code` for local testing.
+For Mail.ru SMTP use host `smtp.mail.ru`, port `465`, `EMAIL_USE_SSL=True`, `EMAIL_USE_TLS=False`, `EMAIL_HOST_USER=info@avtch.io`, `DEFAULT_FROM_EMAIL=info@avtch.io`, and an app-specific SMTP password in `EMAIL_HOST_PASSWORD`. In `DEBUG` the code is also returned in the API response as `debug_code` for local testing.
 
 ### Employee registry / registration
 - `AVATRACKER_EMPLOYEE_URL` — endpoint template, default: `https://avatracker.online/api/v1/employees/{iin}`

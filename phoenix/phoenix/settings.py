@@ -211,7 +211,7 @@ EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
 # Hard cap on SMTP socket operations so a blocked/unreachable mail server cannot
 # hang the request long enough for gunicorn to SIGKILL the worker.
 EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 10)
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "phoenix-vault@example.com")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "info@avtch.io")
 
 # Optional HTTP email provider (Resend). When set, email is sent over HTTPS:443
 # instead of SMTP. This is required on hosts that block outbound SMTP ports

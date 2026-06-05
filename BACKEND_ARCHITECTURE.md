@@ -100,6 +100,7 @@ Main file: `phoenix/phoenix/settings.py`
   - `EMAIL_NOTIFICATIONS_ENABLED` (gate: if `False`, mail is only logged, not sent)
   - `EMAIL_BACKEND`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`
   - `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `DEFAULT_FROM_EMAIL`
+  - current production sender target: Mail.ru SMTP, `DEFAULT_FROM_EMAIL=info@avtch.io`
 - Challenge TTLs:
   - `LOGIN_CHALLENGE_TTL_MINUTES` (login OTP / magic token)
   - `VERIFICATION_CHALLENGE_TTL_MINUTES` (registration / password reset codes)
@@ -517,6 +518,7 @@ Critical runtime vars:
 - Encryption: `FERNET_KEY`, `ASYMMETRIC_*`
 
 > Email codes (registration, password reset, login challenge) are only delivered when `EMAIL_NOTIFICATIONS_ENABLED=True`. Otherwise the message is written to logs, and in `DEBUG` the code is also returned in the API response as `debug_code` / `debug_magic_token`.
+> For Mail.ru SMTP use `EMAIL_HOST=smtp.mail.ru`, `EMAIL_PORT=465`, `EMAIL_USE_SSL=True`, `EMAIL_USE_TLS=False`, `EMAIL_HOST_USER=info@avtch.io`, `DEFAULT_FROM_EMAIL=info@avtch.io`, and the mailbox/app password in `EMAIL_HOST_PASSWORD`.
 
 Recommended key setup:
 - `ASYMMETRIC_PUBLIC_KEY_PATH=keys/public_key.pem`
