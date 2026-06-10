@@ -80,16 +80,18 @@ docker inspect avatracker_nginx --format '{{range $k, $v := .NetworkSettings.Net
 ```bash
 docker compose -f docker-compose.ssh.yml -f docker-compose.avatracker-net.yml up -d --build
 docker compose -f docker-compose.ssh.yml -f docker-compose.avatracker-net.yml ps   # web/db/nginx healthy
-curl http://127.0.0.1:8088/api/health/live/                                        # бэкенд жив
+curl -i http://127.0.0.1:8088/api/health/live/                                     # HTTP/1.1 200 (тело может быть пустым)
 ```
 
 Миграции и collectstatic выполняются автоматически при старте.
 
-Проверить, что avatracker_nginx видит наш контейнер по сети:
+Проверить, что avatracker_nginx видит наш контейнер по сети (заголовок Host
+обязателен — без него Django ответит 400 DisallowedHost, что, впрочем, тоже
+доказывает связность):
 
 ```bash
-docker exec avatracker_nginx sh -c 'wget -qO- http://phoenix-nginx/api/health/live/ || curl -s http://phoenix-nginx/api/health/live/'
-# должен вернуть JSON health-чека
+docker exec avatracker_nginx sh -c 'wget -S -qO- --header "Host: password.avtch.io" http://phoenix-nginx/api/health/live/'
+# в выводе должно быть HTTP/1.1 200
 ```
 
 ## Шаг 5. (Опционально) Ключи шифрования секретов
