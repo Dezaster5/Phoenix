@@ -364,6 +364,13 @@ class CredentialReadSerializer(serializers.ModelSerializer):
 
 
 class CredentialWriteSerializer(serializers.ModelSerializer):
+    # Employees create credentials for themselves: when the field is omitted,
+    # the requester becomes the owner (also keeps UniqueTogetherValidator happy).
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        required=False,
+        default=serializers.CurrentUserDefault(),
+    )
     login = serializers.CharField(required=False, allow_blank=True)
     secret_file = serializers.FileField(write_only=True, required=False, allow_null=True)
 

@@ -48,6 +48,47 @@ describe("VaultPage", () => {
     expect(screen.getByRole("button", { name: "super-secret" })).toBeInTheDocument();
   });
 
+  it("renders the add button only when self-service handlers are provided", () => {
+    const { rerender } = render(<VaultPage {...baseProps} />);
+    expect(screen.queryByRole("button", { name: "Добавить доступ" })).not.toBeInTheDocument();
+
+    rerender(<VaultPage {...baseProps} onOpenCreateCredential={() => {}} />);
+    expect(screen.getByRole("button", { name: "Добавить доступ" })).toBeInTheDocument();
+  });
+
+  it("opens the credential form and submits it", async () => {
+    const user = userEvent.setup();
+    const onOpenCreateCredential = vi.fn();
+    const onSubmitCredential = vi.fn((event) => event.preventDefault());
+
+    render(
+      <VaultPage
+        {...baseProps}
+        onOpenCreateCredential={onOpenCreateCredential}
+        credentialFormOpen
+        credentialForm={{
+          id: null,
+          service_id: "",
+          login: "",
+          secret_type: "password",
+          password: "",
+          notes: ""
+        }}
+        credentialStatus={{ loading: false, error: "", success: "" }}
+        onCredentialChange={() => () => {}}
+        onCloseCredentialForm={() => {}}
+        onSubmitCredential={onSubmitCredential}
+        vaultServices={[{ id: 1, name: "Repo" }]}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Добавить доступ" }));
+    expect(onOpenCreateCredential).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(onSubmitCredential).toHaveBeenCalled();
+  });
+
   it("copies login and secret via explicit actions", async () => {
     const user = userEvent.setup();
     const onCopyField = vi.fn();

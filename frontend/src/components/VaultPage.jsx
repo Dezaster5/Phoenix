@@ -25,7 +25,17 @@ export default function VaultPage({
   serviceOptions,
   filteredSections,
   onCopyField,
-  onDownloadCredentialSecret
+  onDownloadCredentialSecret,
+  vaultServices = [],
+  credentialForm,
+  credentialFormOpen,
+  credentialStatus,
+  onCredentialChange,
+  onOpenCreateCredential,
+  onOpenEditCredential,
+  onCloseCredentialForm,
+  onSubmitCredential,
+  onDeleteCredential
 }) {
   const [nowTs, setNowTs] = useState(Date.now());
   const [passwordVisibleUntil, setPasswordVisibleUntil] = useState({});
@@ -93,6 +103,11 @@ export default function VaultPage({
             <h2>Мои доступы</h2>
             <p>Сервисов: {serviceGroupsCount}, учетных записей: {rows.length}</p>
           </div>
+          {onOpenCreateCredential && (
+            <button className="btn btn-primary" type="button" onClick={onOpenCreateCredential}>
+              Добавить доступ
+            </button>
+          )}
         </div>
 
         <div className="toolbar-row">
@@ -268,6 +283,97 @@ export default function VaultPage({
           >
             Подробнее
           </button>
+          {onOpenEditCredential && openMenu.row.secret_type !== "ssh_key" && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenEditCredential(openMenu.row);
+                setOpenMenu(null);
+              }}
+            >
+              Изменить
+            </button>
+          )}
+          {onDeleteCredential && (
+            <button
+              type="button"
+              onClick={() => {
+                onDeleteCredential(openMenu.row);
+                setOpenMenu(null);
+              }}
+            >
+              Отключить
+            </button>
+          )}
+        </div>
+      )}
+
+      {credentialFormOpen && credentialForm && (
+        <div className="modal-backdrop" onClick={onCloseCredentialForm}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{credentialForm.id ? "Изменить доступ" : "Добавить доступ"}</h3>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={onCloseCredentialForm}>
+                Закрыть
+              </button>
+            </div>
+            <form className="modal-form" onSubmit={onSubmitCredential}>
+              {!credentialForm.id && (
+                <label>
+                  Сервис
+                  <select value={credentialForm.service_id} onChange={onCredentialChange("service_id")}>
+                    <option value="">Выберите сервис</option>
+                    {vaultServices.map((service) => (
+                      <option key={service.id} value={service.id}>
+                        {service.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label>
+                Тип секрета
+                <select value={credentialForm.secret_type} onChange={onCredentialChange("secret_type")}>
+                  <option value="password">Пароль</option>
+                  <option value="api_token">API токен</option>
+                </select>
+              </label>
+              {credentialForm.secret_type === "password" && (
+                <label>
+                  Логин
+                  <input
+                    type="text"
+                    value={credentialForm.login}
+                    onChange={onCredentialChange("login")}
+                    placeholder="Логин для сервиса"
+                  />
+                </label>
+              )}
+              <label>
+                {credentialForm.secret_type === "api_token" ? "Токен" : "Пароль"}
+                <input
+                  type="password"
+                  value={credentialForm.password}
+                  onChange={onCredentialChange("password")}
+                  placeholder="Секрет"
+                  autoComplete="new-password"
+                />
+              </label>
+              <label>
+                Примечание
+                <textarea
+                  rows={3}
+                  value={credentialForm.notes}
+                  onChange={onCredentialChange("notes")}
+                  placeholder="Необязательно"
+                />
+              </label>
+              {credentialStatus?.error && <p className="inline-error">{credentialStatus.error}</p>}
+              <button className="btn btn-primary" type="submit" disabled={credentialStatus?.loading}>
+                {credentialStatus?.loading ? "Сохранение…" : "Сохранить"}
+              </button>
+            </form>
+          </div>
         </div>
       )}
 

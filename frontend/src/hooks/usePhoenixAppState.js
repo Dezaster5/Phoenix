@@ -197,6 +197,15 @@ const createEditCredentialForm = () => ({
   notes: ""
 });
 
+const createVaultCredentialForm = () => ({
+  id: null,
+  service_id: "",
+  login: "",
+  secret_type: "password",
+  password: "",
+  notes: ""
+});
+
 const createAdminForm = () => ({
   portal_login: "",
   full_name: "",
@@ -329,6 +338,9 @@ export default function usePhoenixAppState() {
   const [editCredentialForm, setEditCredentialForm] = useState(createEditCredentialForm());
   const [adminForm, setAdminForm] = useState(createAdminForm());
   const [credentialForm, setCredentialForm] = useState(createCredentialForm());
+  const [vaultCredentialForm, setVaultCredentialForm] = useState(createVaultCredentialForm());
+  const [vaultCredentialOpen, setVaultCredentialOpen] = useState(false);
+  const [vaultCredentialStatus, setVaultCredentialStatus] = useState(createMessageState());
   const [shareForm, setShareForm] = useState(createShareForm());
   const [accessRequestForm, setAccessRequestForm] = useState(createAccessRequestForm());
   const [adminTab, setAdminTab] = useState("department");
@@ -1151,6 +1163,108 @@ export default function usePhoenixAppState() {
     }
   };
 
+  const refreshVaultCredentials = async () => {
+    const credentials = await apiFetchCredentials(token);
+    const credentialItems = (Array.isArray(credentials) ? credentials : credentials.results || [])
+      .slice()
+      .sort(byDateDesc("updated_at"));
+    setSections(groupCredentialsByService(credentialItems));
+  };
+
+  const handleVaultCredentialChange = (field) => (event) => {
+    const value = event.target.value;
+    setVaultCredentialForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "secret_type" && value !== "password") {
+        next.login = "";
+      }
+      return next;
+    });
+  };
+
+  const handleOpenVaultCredentialCreate = () => {
+    setVaultCredentialForm(createVaultCredentialForm());
+    setVaultCredentialStatus(createMessageState());
+    setVaultCredentialOpen(true);
+  };
+
+  const handleOpenVaultCredentialEdit = (row) => {
+    setVaultCredentialForm({
+      id: row.id,
+      service_id: "",
+      login: row.secret_type === "password" ? row.login || "" : "",
+      secret_type: row.secret_type || "password",
+      password: row.password || "",
+      notes: row.notes || ""
+    });
+    setVaultCredentialStatus(createMessageState());
+    setVaultCredentialOpen(true);
+  };
+
+  const handleCloseVaultCredentialForm = () => {
+    setVaultCredentialOpen(false);
+    setVaultCredentialForm(createVaultCredentialForm());
+    setVaultCredentialStatus(createMessageState());
+  };
+
+  const handleSubmitVaultCredential = async (event) => {
+    event.preventDefault();
+    setVaultCredentialStatus({ loading: true, error: "", success: "" });
+    try {
+      const isEdit = Boolean(vaultCredentialForm.id);
+      if (!isEdit && !vaultCredentialForm.service_id) {
+        throw new Error("Выберите сервис.");
+      }
+      if (vaultCredentialForm.secret_type === "password" && !vaultCredentialForm.login.trim()) {
+        throw new Error("Логин обязателен.");
+      }
+      if (!vaultCredentialForm.password) {
+        throw new Error("Секрет обязателен.");
+      }
+
+      const payload = {
+        login:
+          vaultCredentialForm.secret_type === "api_token"
+            ? "api-token"
+            : vaultCredentialForm.login.trim(),
+        secret_type: vaultCredentialForm.secret_type || "password",
+        password: vaultCredentialForm.password,
+        notes: vaultCredentialForm.notes.trim()
+      };
+
+      if (isEdit) {
+        await apiUpdateCredential(token, vaultCredentialForm.id, payload);
+      } else {
+        await apiCreateCredential(token, {
+          ...payload,
+          service: Number(vaultCredentialForm.service_id),
+          is_active: true
+        });
+      }
+
+      await refreshVaultCredentials();
+      setVaultCredentialOpen(false);
+      setVaultCredentialForm(createVaultCredentialForm());
+      setVaultCredentialStatus(createMessageState());
+      showToast(isEdit ? "Доступ обновлен." : "Доступ добавлен.");
+    } catch (err) {
+      setVaultCredentialStatus({ loading: false, error: err.message, success: "" });
+    }
+  };
+
+  const handleDeleteVaultCredential = async (row) => {
+    if (!window.confirm("Отключить этот доступ?")) {
+      return;
+    }
+    try {
+      await apiDeleteCredential(token, row.id);
+      await refreshVaultCredentials();
+      showToast("Доступ отключен.");
+    } catch (err) {
+      showToast(err.message || "Не удалось отключить доступ.", "error");
+    }
+  };
+
   const handleCreateCredential = async (event) => {
     event.preventDefault();
     setCredentialStatus({ loading: true, error: "", success: "" });
@@ -1589,7 +1703,17 @@ export default function usePhoenixAppState() {
       serviceOptions,
       filteredSections,
       onCopyField: handleCopyCredentialValue,
-      onDownloadCredentialSecret: handleDownloadCredentialSecret
+      onDownloadCredentialSecret: handleDownloadCredentialSecret,
+      vaultServices: requestableServices,
+      credentialForm: vaultCredentialForm,
+      credentialFormOpen: vaultCredentialOpen,
+      credentialStatus: vaultCredentialStatus,
+      onCredentialChange: handleVaultCredentialChange,
+      onOpenCreateCredential: handleOpenVaultCredentialCreate,
+      onOpenEditCredential: handleOpenVaultCredentialEdit,
+      onCloseCredentialForm: handleCloseVaultCredentialForm,
+      onSubmitCredential: handleSubmitVaultCredential,
+      onDeleteCredential: handleDeleteVaultCredential
     },
     servicesPageProps: {
       requestableServices,

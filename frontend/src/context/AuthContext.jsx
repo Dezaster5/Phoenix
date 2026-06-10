@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 const AuthContext = createContext(null);
 
@@ -58,15 +58,18 @@ function buildAuthStateFromPayload(payload, currentState = readStoredAuth()) {
 export function AuthProvider({ children }) {
   const [authState, setAuthState] = useState(readStoredAuth);
 
-  const applyAuthPayload = (payload) => {
+  // Stable identities: effects depend on these callbacks, so recreating them
+  // on each render caused an infinite refetch loop (load -> setState -> new
+  // callback -> effect fires again).
+  const applyAuthPayload = useCallback((payload) => {
     setAuthState((currentState) => {
       const nextState = buildAuthStateFromPayload(payload, currentState);
       persistAuthState(nextState);
       return nextState;
     });
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     clearStoredAuth();
     setAuthState({
       token: "",
@@ -78,7 +81,7 @@ export function AuthProvider({ children }) {
       viewerFullName: "",
       viewerDepartment: "Без отдела"
     });
-  };
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -87,7 +90,7 @@ export function AuthProvider({ children }) {
       applyAuthPayload,
       logout
     }),
-    [authState]
+    [authState, applyAuthPayload, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

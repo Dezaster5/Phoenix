@@ -812,20 +812,32 @@ class CredentialViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if _is_superuser(user):
             return
-        if not _is_department_head(user):
-            raise PermissionDenied("Only superuser or department head can modify credentials.")
-        if user.department_id is None:
-            raise PermissionDenied("Department head must have a department.")
-        if credential and credential.user.department_id != user.department_id:
-            raise PermissionDenied("You can modify only your department credentials.")
+        if _is_department_head(user):
+            if user.department_id is None:
+                raise PermissionDenied("Department head must have a department.")
+            if credential and credential.user.department_id != user.department_id:
+                raise PermissionDenied("You can modify only your department credentials.")
+            return
+        # Regular employees manage only their personal credentials.
+        if credential and credential.user_id != user.id:
+            raise PermissionDenied("You can modify only your own credentials.")
+
+    def _ensure_target_user_allowed(self, target_user):
+        user = self.request.user
+        if _is_superuser(user):
+            return
+        if _is_department_head(user):
+            if target_user.department_id != user.department_id:
+                raise ValidationError("You can assign credentials only to your department users.")
+            return
+        if target_user.id != user.id:
+            raise ValidationError("You can create credentials only for yourself.")
 
     def perform_create(self, serializer):
         self._ensure_credential_write_allowed()
-        user = self.request.user
-        target_user = serializer.validated_data["user"]
-        if not _is_superuser(user) and target_user.department_id != user.department_id:
-            raise ValidationError("You can assign credentials only to your department users.")
-        credential = serializer.save()
+        target_user = serializer.validated_data.get("user") or self.request.user
+        self._ensure_target_user_allowed(target_user)
+        credential = serializer.save(user=target_user)
         ServiceAccess.objects.update_or_create(
             user=credential.user,
             service=credential.service,
@@ -836,7 +848,7 @@ class CredentialViewSet(viewsets.ModelViewSet):
             changed_by=self.request.user,
             change_type=CredentialVersion.ChangeType.CREATE,
         )
-        if credential.user.email:
+        if credential.user.email and credential.user_id != self.request.user.id:
             send_platform_email(
                 subject="Phoenix Vault: доступ выдан",
                 body=(
@@ -851,9 +863,7 @@ class CredentialViewSet(viewsets.ModelViewSet):
         credential = self.get_object()
         self._ensure_credential_write_allowed(credential=credential)
         target_user = serializer.validated_data.get("user", credential.user)
-        actor = self.request.user
-        if not _is_superuser(actor) and target_user.department_id != actor.department_id:
-            raise ValidationError("You can assign credentials only to your department users.")
+        self._ensure_target_user_allowed(target_user)
         credential = serializer.save()
         ServiceAccess.objects.update_or_create(
             user=credential.user,
@@ -865,7 +875,7 @@ class CredentialViewSet(viewsets.ModelViewSet):
             changed_by=self.request.user,
             change_type=CredentialVersion.ChangeType.UPDATE,
         )
-        if credential.user.email:
+        if credential.user.email and credential.user_id != self.request.user.id:
             send_platform_email(
                 subject="Phoenix Vault: учетные данные обновлены",
                 body=(
@@ -886,7 +896,7 @@ class CredentialViewSet(viewsets.ModelViewSet):
             changed_by=request.user,
             change_type=CredentialVersion.ChangeType.DISABLE,
         )
-        if instance.user.email:
+        if instance.user.email and instance.user_id != request.user.id:
             send_platform_email(
                 subject="Phoenix Vault: доступ отключен",
                 body=(f"Доступ к сервису '{instance.service.name}' был отключен."),

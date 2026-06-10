@@ -176,3 +176,78 @@ class PermissionMatrixTests(TestCase):
         self._auth(self.superuser)
         response = self.client.get("/api/audit-logs/")
         self.assertEqual(response.status_code, 200)
+
+    def test_employee_can_create_credential_for_self(self):
+        self._auth(self.emp_it)
+        response = self.client.post(
+            "/api/credentials/",
+            {
+                "service": self.service_mkt.id,
+                "login": "personal@login",
+                "password": "personal-pass",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        credential = Credential.objects.get(user=self.emp_it, service=self.service_mkt)
+        self.assertEqual(credential.login, "personal@login")
+
+        list_response = self.client.get("/api/credentials/")
+        ids = {item["id"] for item in list_response.json()}
+        self.assertIn(credential.id, ids)
+
+    def test_employee_cannot_create_credential_for_other_user(self):
+        self._auth(self.emp_it)
+        response = self.client.post(
+            "/api/credentials/",
+            {
+                "user": self.emp_mkt.id,
+                "service": self.service_mkt.id,
+                "login": "foreign@login",
+                "password": "foreign-pass",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            Credential.objects.filter(user=self.emp_mkt, service=self.service_mkt, login="foreign@login").exists()
+        )
+
+    def test_employee_can_update_own_credential(self):
+        self._auth(self.emp_it)
+        response = self.client.patch(
+            f"/api/credentials/{self.cred_it.id}/",
+            {"notes": "self-edited"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.cred_it.refresh_from_db()
+        self.assertEqual(self.cred_it.notes, "self-edited")
+
+    def test_employee_cannot_reassign_own_credential_to_other_user(self):
+        self._auth(self.emp_it)
+        response = self.client.patch(
+            f"/api/credentials/{self.cred_it.id}/",
+            {"user": self.emp_mkt.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.cred_it.refresh_from_db()
+        self.assertEqual(self.cred_it.user_id, self.emp_it.id)
+
+    def test_employee_cannot_touch_foreign_credential(self):
+        self._auth(self.emp_it)
+        response = self.client.patch(
+            f"/api/credentials/{self.cred_mkt.id}/",
+            {"notes": "hacked"},
+            format="json",
+        )
+        # Foreign credential is not even visible to the employee queryset.
+        self.assertEqual(response.status_code, 404)
+
+    def test_employee_can_disable_own_credential(self):
+        self._auth(self.emp_it)
+        response = self.client.delete(f"/api/credentials/{self.cred_it.id}/")
+        self.assertEqual(response.status_code, 204)
+        self.cred_it.refresh_from_db()
+        self.assertFalse(self.cred_it.is_active)
