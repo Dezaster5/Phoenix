@@ -1,0 +1,27 @@
+# Overlay for the Avatracker server (10.10.10.17), where ports 80/443 are owned
+# by the avatracker_nginx container. Attaches our nginx to the Avatracker docker
+# network under the DNS name `phoenix-nginx`, so avatracker_nginx can proxy
+# password.avtch.io to it (see deploy/avatracker-nginx-password.avtch.io.conf).
+#
+# Verify the network name before the first run:
+#   docker inspect avatracker_nginx --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{println}}{{end}}'
+# and fix `networks.avatracker.name` below if it differs.
+#
+# Usage:
+#   docker compose -f docker-compose.ssh.yml -f docker-compose.avatracker-net.yml up -d --build
+#
+# Note: compose also adds the service name `nginx` as a DNS alias on the shared
+# network; always reference this container as `phoenix-nginx` to avoid clashing
+# with Avatracker's own nginx.
+services:
+  nginx:
+    networks:
+      default: {}
+      avatracker:
+        aliases:
+          - phoenix-nginx
+
+networks:
+  avatracker:
+    external: true
+    name: avatracker-back_avatracker_network
