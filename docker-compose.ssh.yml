@@ -16,6 +16,13 @@ services:
 
   web:
     build: .
+    # Plain `web` is ambiguous when nginx is also attached to the Avatracker
+    # network (its backend is named `web` too) — deploy/nginx.conf proxies to
+    # the unique alias instead.
+    networks:
+      default:
+        aliases:
+          - phoenix-web
     env_file:
       - .env
     environment:
