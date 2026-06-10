@@ -91,7 +91,7 @@ class AuditVisibilityTests(TestCase):
         self._auth(self.employee_it)
         response = self.client.get("/api/audit-logs/")
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
+        payload = response.json()["results"]
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["actor"]["portal_login"], self.employee_it.portal_login)
 
@@ -99,7 +99,7 @@ class AuditVisibilityTests(TestCase):
         self._auth(self.head_marketing)
         response = self.client.get("/api/audit-logs/")
         self.assertEqual(response.status_code, 200)
-        actor_logins = {item["actor"]["portal_login"] for item in response.json()}
+        actor_logins = {item["actor"]["portal_login"] for item in response.json()["results"]}
         self.assertIn(self.employee_it.portal_login, actor_logins)
         self.assertIn(self.employee_marketing.portal_login, actor_logins)
         self.assertNotIn(self.employee_finance.portal_login, actor_logins)
@@ -108,7 +108,7 @@ class AuditVisibilityTests(TestCase):
         self._auth(self.superuser)
         response = self.client.get("/api/audit-logs/")
         self.assertEqual(response.status_code, 200)
-        actor_logins = {item["actor"]["portal_login"] for item in response.json()}
+        actor_logins = {item["actor"]["portal_login"] for item in response.json()["results"]}
         self.assertIn(self.employee_it.portal_login, actor_logins)
         self.assertIn(self.employee_marketing.portal_login, actor_logins)
         self.assertIn(self.employee_finance.portal_login, actor_logins)
@@ -118,12 +118,38 @@ class AuditVisibilityTests(TestCase):
 
         by_actor = self.client.get("/api/audit-logs/?actor=emp.it.audit")
         self.assertEqual(by_actor.status_code, 200)
-        actor_logins = {item["actor"]["portal_login"] for item in by_actor.json()}
+        actor_logins = {item["actor"]["portal_login"] for item in by_actor.json()["results"]}
         self.assertEqual(actor_logins, {self.employee_it.portal_login})
 
         by_object_type = self.client.get("/api/audit-logs/?object_type=Credential")
         self.assertEqual(by_object_type.status_code, 200)
-        self.assertTrue(by_object_type.json())
+        self.assertTrue(by_object_type.json()["results"])
+
+    def test_audit_log_list_is_paginated(self):
+        for index in range(25):
+            AuditLog.objects.create(
+                actor=self.employee_finance,
+                action=AuditLog.Action.VIEW,
+                object_type="Credential",
+                object_id=str(100 + index),
+            )
+        total = AuditLog.objects.count()
+
+        self._auth(self.superuser)
+        first_page = self.client.get("/api/audit-logs/")
+        self.assertEqual(first_page.status_code, 200)
+        payload = first_page.json()
+        self.assertEqual(payload["count"], total)
+        self.assertEqual(len(payload["results"]), 20)
+        self.assertIsNotNone(payload["next"])
+
+        second_page = self.client.get("/api/audit-logs/?page=2")
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(len(second_page.json()["results"]), total - 20)
+
+        custom_size = self.client.get("/api/audit-logs/?page_size=5")
+        self.assertEqual(custom_size.status_code, 200)
+        self.assertEqual(len(custom_size.json()["results"]), 5)
 
     def test_superuser_can_export_audit_logs_as_csv(self):
         self._auth(self.superuser)

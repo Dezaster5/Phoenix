@@ -116,6 +116,10 @@ export default function AdminPanel({
   auditLogs,
   auditStatus,
   auditFilters,
+  auditPage = 1,
+  auditCount = 0,
+  auditTotalPages = 1,
+  onAuditPageChange,
   auditActorOptions,
   auditActionOptions,
   auditObjectTypeOptions,
@@ -978,7 +982,7 @@ export default function AdminPanel({
             <div className="panel-header">
               <div>
                 <h2>Аудит</h2>
-                <p>Журнал действий по доступам, секретам и входам.</p>
+                <p>Журнал действий по доступам, секретам и входам. Всего записей: {auditCount}</p>
               </div>
             </div>
 
@@ -1060,6 +1064,30 @@ export default function AdminPanel({
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {auditTotalPages > 1 && (
+              <div className="pagination-row">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  disabled={auditPage === 1 || auditStatus.loading}
+                  onClick={() => onAuditPageChange?.(Math.max(1, auditPage - 1))}
+                >
+                  Назад
+                </button>
+                <span>
+                  {auditPage} / {auditTotalPages}
+                </span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  disabled={auditPage === auditTotalPages || auditStatus.loading}
+                  onClick={() => onAuditPageChange?.(Math.min(auditTotalPages, auditPage + 1))}
+                >
+                  Вперед
+                </button>
               </div>
             )}
           </section>

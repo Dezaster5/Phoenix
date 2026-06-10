@@ -11,6 +11,7 @@ from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -1230,9 +1231,18 @@ class AccessRequestViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+class AuditLogPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AuditLogSerializer
     permission_classes = [IsAuthenticated]
+    # Audit grows unbounded, so the list endpoint is paginated
+    # ({count, next, previous, results}); /export/ still returns everything.
+    pagination_class = AuditLogPagination
 
     def _apply_filters(self, qs):
         actor = str(self.request.query_params.get("actor", "")).strip()

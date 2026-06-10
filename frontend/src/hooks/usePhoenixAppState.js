@@ -160,6 +160,9 @@ const createReviewRequestFilters = () => ({
   query: ""
 });
 
+// Keep in sync with AuditLogPagination.page_size on the backend.
+const AUDIT_PAGE_SIZE = 20;
+
 const createAuditFilters = () => ({
   actor: "",
   action: "all",
@@ -331,6 +334,8 @@ export default function usePhoenixAppState() {
   const [auditFilters, setAuditFilters] = useState(createAuditFilters());
   const [reviewComments, setReviewComments] = useState({});
   const [auditLogs, setAuditLogs] = useState([]);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditCount, setAuditCount] = useState(0);
   const [auditStatus, setAuditStatus] = useState(createMessageState());
   const [filters, setFilters] = useState({ credentialService: "all" });
   const [credentialPage, setCredentialPage] = useState(1);
@@ -477,24 +482,36 @@ export default function usePhoenixAppState() {
   useEffect(() => {
     if (!token || !canManage) {
       setAuditLogs([]);
+      setAuditCount(0);
       return undefined;
     }
 
     const loadAuditLogs = async () => {
       try {
         setAuditStatus({ loading: true, error: "", success: "" });
-        const response = await apiFetchAuditLogs(token, auditFilters);
-        setAuditLogs(Array.isArray(response) ? response : response.results || []);
+        const response = await apiFetchAuditLogs(token, {
+          ...auditFilters,
+          page: auditPage,
+          page_size: AUDIT_PAGE_SIZE
+        });
+        if (Array.isArray(response)) {
+          setAuditLogs(response);
+          setAuditCount(response.length);
+        } else {
+          setAuditLogs(response.results || []);
+          setAuditCount(Number(response.count) || 0);
+        }
         setAuditStatus({ loading: false, error: "", success: "" });
       } catch (err) {
         setAuditLogs([]);
+        setAuditCount(0);
         setAuditStatus({ loading: false, error: err.message || "Не удалось загрузить аудит.", success: "" });
       }
     };
 
     loadAuditLogs();
     return undefined;
-  }, [token, canManage, auditFilters]);
+  }, [token, canManage, auditFilters, auditPage]);
 
   useEffect(() => {
     setCredentialPage(1);
@@ -1072,6 +1089,8 @@ export default function usePhoenixAppState() {
 
   const handleAuditFilterChange = (field) => (event) => {
     setAuditFilters((prev) => ({ ...prev, [field]: event.target.value }));
+    // Filters change the result set, so navigation restarts from page 1.
+    setAuditPage(1);
   };
 
   const handleApproveWithComment = async (requestId) => {
@@ -1504,31 +1523,42 @@ export default function usePhoenixAppState() {
     [reviewableAccessRequests, reviewRequestFilters]
   );
 
+  // Options are built from the current page, so the active filter value is
+  // pinned explicitly — otherwise it could vanish from the select after paging.
   const auditActorOptions = useMemo(() => {
     const unique = new Map();
+    if (auditFilters.actor) {
+      unique.set(auditFilters.actor, auditFilters.actor);
+    }
     auditLogs.forEach((item) => {
       const login = item.actor?.portal_login;
       if (!login) return;
       unique.set(login, login);
     });
     return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [auditLogs]);
+  }, [auditLogs, auditFilters.actor]);
 
   const auditActionOptions = useMemo(() => {
     const unique = new Set();
+    if (auditFilters.action && auditFilters.action !== "all") {
+      unique.add(auditFilters.action);
+    }
     auditLogs.forEach((item) => {
       if (item.action) unique.add(item.action);
     });
     return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [auditLogs]);
+  }, [auditLogs, auditFilters.action]);
 
   const auditObjectTypeOptions = useMemo(() => {
     const unique = new Set();
+    if (auditFilters.object_type && auditFilters.object_type !== "all") {
+      unique.add(auditFilters.object_type);
+    }
     auditLogs.forEach((item) => {
       if (item.object_type) unique.add(item.object_type);
     });
     return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, "ru"));
-  }, [auditLogs]);
+  }, [auditLogs, auditFilters.object_type]);
 
   const exportAccessRequestsCsv = (items, prefix) => {
     try {
@@ -1796,6 +1826,10 @@ export default function usePhoenixAppState() {
       auditLogs,
       auditStatus,
       auditFilters,
+      auditPage,
+      auditCount,
+      auditTotalPages: Math.max(1, Math.ceil(auditCount / AUDIT_PAGE_SIZE)),
+      onAuditPageChange: setAuditPage,
       auditActorOptions,
       auditActionOptions,
       auditObjectTypeOptions,
